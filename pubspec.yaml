@@ -11,7 +11,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
   speech_to_text: ^6.6.0
-  flutter_tts: ^4.0.2
+  # Dikunci 4.0.2: versi 4.2.x butuh Kotlin 2.x dan gagal compile dengan Kotlin 1.9.10.
+  flutter_tts: 4.0.2
   http: ^1.2.0
   flutter_overlay_window: ^0.4.5
   permission_handler: ^11.3.0
