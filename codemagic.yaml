@@ -14,11 +14,6 @@ workflows:
       vars:
         PACKAGE_NAME: "com.jarvis.robotai"
     scripts:
-      - name: Siapkan .env
-        script: |
-          if [ ! -f .env ] && [ -f .env.example ]; then
-            cp .env.example .env
-          fi
       - name: Pub get
         script: flutter pub get
       - name: Build APK

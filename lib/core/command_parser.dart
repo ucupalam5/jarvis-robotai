@@ -60,7 +60,7 @@ const Map<String, String> appMap = {
   'playstore': 'com.android.vending',
 };
 
-ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
+ParsedCommand parseLocalCommand(String rawText) {
   final t = rawText.toLowerCase().trim();
 
   // --- BUKA APLIKASI: "buka whatsapp", "open youtube", "tolong bukain ig" ---
@@ -108,37 +108,18 @@ ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
     );
   }
 
-  // --- NYALAKAN LAYAR via Shizuku (layar-mati, bukan mati total) ---
+  // --- NYALAKAN LAYAR (layar-mati, bukan mati total).
+  // Tanpa Shizuku: hanya menyalakan layar via WakeLock.
+  // Kalau ada PIN/fingerprint, buka manual ya Sir (blokir keamanan Android).
   if (t.contains('nyalakan layar') ||
       t.contains('nyalakan hp') ||
       t.contains('hidupkan layar') ||
       t.contains('bangun') ||
       t.contains('wake up')) {
-    final p = pin;
     return ParsedCommand(
       handledLocally: true,
-      reply: 'Menyalakan layar via Shizuku, Sir.',
-      action: () => AppController.shizukuWakeUnlock(p),
-    );
-  }
-
-  // --- SHIZUKU: tap otomatis (misal tombol Kirim WA di kanan bawah) ---
-  if ((t.contains('tap kirim') || t.contains('tekan kirim') || t.contains('klik kirim'))) {
-    return ParsedCommand(
-      handledLocally: true,
-      reply: 'Men-tap tombol kirim, Sir.',
-      // koordinat umum tombol kirim WA: kanan bawah. Bisa disesuaikan per HP.
-      action: () => AppController.shizukuTap(935, 950),
-    );
-  }
-
-  // --- SHIZUKU: ketik teks otomatis ---
-  if (t.startsWith('ketik ') || t.startsWith('ketikkan ')) {
-    final txt = rawText.replaceFirst(RegExp(r'(?i)^(ketik|ketikkan)\s+'), '').trim();
-    return ParsedCommand(
-      handledLocally: true,
-      reply: 'Mengetik via Shizuku, Sir.',
-      action: () => AppController.shizukuType(txt),
+      reply: 'Menyalakan layar, Sir.',
+      action: () => AppController.wakeUp(),
     );
   }
 

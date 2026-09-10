@@ -38,14 +38,6 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
 
-      - name: Siapkan .env (wajib karena pubspec assets ada .env)
-        run: |
-          if [ ! -f .env ] && [ -f .env.example ]; then
-            cp .env.example .env
-            echo ".env dibuat dari .env.example"
-          fi
-          ls -la .env || echo "WARNING: .env tidak ada"
-
       - name: Pub get
         run: flutter pub get
 

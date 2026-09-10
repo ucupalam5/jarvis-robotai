@@ -8,28 +8,13 @@ import android.content.Intent
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.PowerManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import rikka.shizuku.Shizuku
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "jarvis/control"
-    private val SHIZUKU_REQ = 1001
-
-    private val shizukuListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-        // hasil izin Shizuku, tidak perlu aksi khusus, Flutter bisa cek ulang via shizukuCheck
-    }
-
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
-        try { Shizuku.addRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
-    }
-
-    override fun onDestroy() {
-        try { Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
-        super.onDestroy()
-    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -49,42 +34,7 @@ class MainActivity : FlutterActivity() {
                     }
                     "volumeUp" -> result.success(volume(1))
                     "volumeDown" -> result.success(volume(-1))
-                    // --- Shizuku (ADB tanpa root) ---
-                    "shizukuCheck" -> result.success(shizukuStatus())
-                    "shizukuRequest" -> {
-                        ShizukuHelper.requestPermission(SHIZUKU_REQ)
-                        result.success("Permintaan izin Shizuku dikirim. Cek app Shizuku ya Sir.")
-                    }
-                    "shizukuExec" -> {
-                        val cmd = call.argument<String>("cmd") ?: ""
-                        // jalan di background biar tidak ANR
-                        Thread {
-                            val r = ShizukuHelper.exec(cmd)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
-                    "shizukuWakeUnlock" -> {
-                        val pin = call.argument<String>("pin") ?: ""
-                        Thread {
-                            val r = ShizukuHelper.wakeAndUnlock(pin)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
-                    "shizukuTap" -> {
-                        val x = call.argument<Int>("x") ?: 935
-                        val y = call.argument<Int>("y") ?: 950
-                        Thread {
-                            val r = ShizukuHelper.tap(x, y)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
-                    "shizukuType" -> {
-                        val text = call.argument<String>("text") ?: ""
-                        Thread {
-                            val r = ShizukuHelper.typeText(text)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
+                    "wakeUp" -> result.success(wakeUp())
                     else -> result.notImplemented()
                 }
             }
@@ -193,17 +143,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun shizukuStatus(): String {
+    private fun wakeUp(): String {
         return try {
-            val alive = ShizukuHelper.isBinderAlive()
-            val granted = ShizukuHelper.isGranted()
-            when {
-                !alive -> "NONAKTIF: Buka app Shizuku > Start (pairing WiFi, tanpa PC bisa)."
-                !granted -> "BELUM_IZIN: Buka Shizuku > Authorized apps > izinkan com.jarvis.robotai."
-                else -> "OK"
-            }
+            // Nyalakan layar via WakeLock (tanpa root/Shizuku).
+            // Catatan: hanya menyalakan layar. PIN/fingerprint tetap manual.
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "jarvis:wakeup"
+            )
+            wl.acquire(3000)
+            wl.release()
+            "OK"
         } catch (e: Exception) {
-            "Gagal cek Shizuku: ${e.message}"
+            "Gagal menyalakan layar: ${e.message}"
         }
     }
 }

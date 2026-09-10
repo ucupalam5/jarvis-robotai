@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
 import '../core/groq_service.dart';
-import '../core/overlay_service.dart';
 import '../core/voice_service.dart';
 import 'jarvis_orb.dart';
 
@@ -30,9 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   String _draft = '';
   final _apiCtrl = TextEditingController();
-  final _pinCtrl = TextEditingController();
   final _scroll = ScrollController();
-  String _shizuku = '...';
 
   @override
   void initState() {
@@ -45,27 +42,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final k = sp.getString('groq_key') ?? '';
     widget.groq.apiKey = k;
     _apiCtrl.text = k;
-    _pinCtrl.text = sp.getString('pin') ?? '';
     setState(() {});
-    _refreshShizuku(silent: true);
-  }
-
-  Future<void> _refreshShizuku({bool silent = false}) async {
-    final s = await AppController.shizukuCheck();
-    if (mounted) setState(() => _shizuku = s);
-    if (!silent && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Shizuku: $s')));
-    }
   }
 
   Future<void> _saveKey() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('groq_key', _apiCtrl.text.trim());
-    await sp.setString('pin', _pinCtrl.text.trim());
     widget.groq.apiKey = _apiCtrl.text.trim();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API key + PIN tersimpan, Sir.')),
+        const SnackBar(content: Text('API key Groq tersimpan, Sir.')),
       );
     }
   }
@@ -88,9 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollDown();
 
     // 1) Coba perintah lokal (buka/tutup app, kunci layar, dsb) -> cepat, offline.
-    final sp = await SharedPreferences.getInstance();
-    final savedPin = sp.getString('pin') ?? '';
-    final cmd = parseLocalCommand(text, pin: savedPin);
+    final cmd = parseLocalCommand(text);
     String reply;
     if (cmd.handledLocally) {
       reply = cmd.reply;
@@ -153,17 +137,6 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.picture_in_picture, color: Colors.cyanAccent),
-            tooltip: 'Popup overlay',
-            onPressed: () async {
-              await OverlayService.show();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Popup Jarvis aktif, Sir. Bisa digeser-geser.')));
-              }
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.settings, color: Colors.cyanAccent),
             onPressed: _openSettings,
             tooltip: 'API Key Groq',
@@ -187,29 +160,6 @@ class _HomeScreenState extends State<HomeScreen> {
             style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
           ),
           const SizedBox(height: 8),
-          // Status Shizuku (ADB tanpa root)
-          GestureDetector(
-            onTap: () => _refreshShizuku(),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: _shizuku == 'OK'
-                    ? Colors.green.withOpacity(0.15)
-                    : Colors.orange.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                    color: _shizuku == 'OK' ? Colors.greenAccent : Colors.orangeAccent),
-              ),
-              child: Text(
-                _shizuku == 'OK'
-                    ? '● Shizuku OK — tap untuk cek ulang'
-                    : '● Shizuku: $_shizuku — tap untuk cek',
-                style: const TextStyle(color: Colors.white70, fontSize: 11),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
           // Tombol cepat
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -221,8 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _quick('Tutup app', () => AppController.closeApp()),
                 _quick('Home', () => AppController.goHome()),
                 _quick('Kunci layar', () => _handleText('kunci layar')),
-                _quick('Nyala via Shizuku', () => _handleText('nyalakan layar')),
-                _quick('Izin Shizuku', () => AppController.shizukuRequest()),
+                _quick('Nyalakan layar', () => _handleText('nyalakan layar')),
                 _quick('Senter ON', () => _handleText('nyalakan senter')),
               ],
             ),
@@ -280,15 +229,13 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF0A1628),
-        title: const Text('Settings Jarvis',
+        title: const Text('Groq API Key (gratis)',
             style: TextStyle(color: Colors.cyanAccent)),
-        content: SingleChildScrollView(
-          child: Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Groq API (gratis):\n1. Buka console.groq.com\n2. Create API Key\n3. Paste, Save.',
+              '1. Buka console.groq.com\n2. Create API Key gratis\n3. Paste ke sini, Save.',
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 10),
@@ -297,28 +244,8 @@ class _HomeScreenState extends State<HomeScreen> {
               obscureText: true,
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(
-                labelText: 'gsk_...',
-                labelStyle: TextStyle(color: Colors.white30),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.cyanAccent)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.cyanAccent)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'PIN layar (opsional, untuk "nyalakan layar" via Shizuku).\nRisiko: tersimpan plaintext. Kosongkan bila pakai fingerprint/Smart Lock.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _pinCtrl,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'PIN, misal 123456',
-                labelStyle: TextStyle(color: Colors.white30),
+                hintText: 'gsk_...',
+                hintStyle: TextStyle(color: Colors.white30),
                 enabledBorder: OutlineInputBorder(
                     borderSide: BorderSide(color: Colors.cyanAccent)),
                 focusedBorder: OutlineInputBorder(
@@ -326,7 +253,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ],
-        ),
         ),
         actions: [
           TextButton(
