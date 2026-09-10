@@ -111,6 +111,8 @@ class _JarvisOverlayAppState extends State<JarvisOverlayApp> {
       child: Icon(popupIcons[_icon] ?? Icons.smart_toy,
           color: accent, size: 36),
     );
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = _hexColor(_color);
