@@ -47,6 +47,10 @@ class AppController {
   static Future<String> handsfreeWake(bool on) =>
       _invoke('handsfreeWake', {'on': on});
 
+  // --- Popup tap -> auto dengar + izin notifikasi ---
+  static Future<String> consumeAutolisten() => _invoke('consumeAutolisten');
+  static Future<String> requestNotif() => _invoke('requestNotif');
+
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
   static Future<String> accOpenSettings() => _invoke('accOpenSettings');

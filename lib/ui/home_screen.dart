@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
@@ -22,7 +24,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final List<ChatMsg> _chat = [ChatMsg('jarvis', 'Halo Sir, saya JARVIS. Tap orb dan bicara, Sir. Contoh: "buka WhatsApp", "kunci layar".')];
   final List<Map<String, String>> _history = [];
   bool _listening = false;
@@ -38,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _popImage = '';
   double _level = 0;
   bool _handsfree = false;
+  bool _silent = false;
   String _keyCheck = ''; // '' | 'ok' | 'bad:pesan'
 
   static const List<String> _popColors = [
@@ -51,7 +54,51 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadKey();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_handsfree) {
+      _handsfree = false;
+      AppController.handsfreeWake(false);
+    }
+    super.dispose();
+  }
+
+  /// Dipanggil saat app kembali dibuka (misal dari tap popup robot).
+  /// Kalau ada permintaan auto-dengar -> langsung dengar tanpa tap orb.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _consumeAutolisten();
+    }
+  }
+
+  Future<void> _consumeAutolisten() async {
+    try {
+      if (await AppController.consumeAutolisten() != 'YA') return;
+      if (!mounted || _busy || _listening || _handsfree) return;
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted || _busy || _listening) return;
+      await widget.voice.stopSpeak();
+      final mic = await AppController.requestMic();
+      if (mic != 'OK' || !mounted) return;
+      await _listenCycle();
+    } catch (_) {}
+  }
+
+  /// Minta semua izin yang bisa diminta langsung saat awal buka app.
+  /// (Overlay + Accessibility tetap via halaman sistem masing-masing.)
+  Future<void> _requestStartupPermissions() async {
+    try {
+      await AppController.requestMic();
+    } catch (_) {}
+    try {
+      await AppController.requestNotif();
+    } catch (_) {}
   }
 
   Future<void> _loadKey() async {
@@ -67,6 +114,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
     _refreshAcc(silent: true);
     _checkKey(silent: true);
+    _requestStartupPermissions();
+    // Cek juga saat pertama buka (misal dibuka dari tap popup).
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _consumeAutolisten();
+    });
   }
 
   /// Validasi API key ke server Groq. Hasil tampil sebagai banner.
@@ -122,6 +174,37 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _handleText(String text) async {
     if (text.trim().isEmpty || _busy) return;
+    final tl = text.toLowerCase().trim();
+    // Mode senyap: Jarvis hanya teks, tanpa suara.
+    if (tl == 'mode senyap' ||
+        tl == 'senyap' ||
+        tl.contains('mode senyap nyala') ||
+        tl.contains('jangan bersuara')) {
+      if (mounted) setState(() => _silent = true);
+      await widget.voice.stopSpeak();
+      if (mounted) {
+        setState(() {
+          _chat.add(ChatMsg('user', text));
+          _chat.add(ChatMsg('jarvis', 'Mode senyap aktif, Sir. Saya hanya teks.'));
+        });
+      }
+      _scrollDown();
+      return;
+    }
+    if (tl == 'mode suara' ||
+        tl.contains('mode senyap mati') ||
+        tl.contains('bersuara lagi')) {
+      if (mounted) setState(() => _silent = false);
+      if (mounted) {
+        setState(() {
+          _chat.add(ChatMsg('user', text));
+          _chat.add(ChatMsg('jarvis', 'Mode suara aktif, Sir.'));
+        });
+      }
+      _scrollDown();
+      await widget.voice.speak('Mode suara aktif, Sir.');
+      return;
+    }
     setState(() {
       _busy = true;
       _chat.add(ChatMsg('user', text));
@@ -156,6 +239,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _busy = false;
     });
     _scrollDown();
+    if (_silent) {
+      if (mounted) setState(() => _speaking = false);
+      return;
+    }
     setState(() => _speaking = true);
     await widget.voice.speak(reply);
     if (mounted) setState(() => _speaking = false);
@@ -468,6 +555,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 _quick('Baterai', () => _handleText('baterai berapa')),
                 _quick(_handsfree ? 'Handsfree ON' : 'Handsfree',
                     () => _setHandsfree(!_handsfree)),
+                _quick(_silent ? 'Senyap ON' : 'Senyap', () {
+                  if (_silent) {
+                    _handleText('mode suara');
+                  } else {
+                    _handleText('mode senyap');
+                  }
+                }),
               ],
             ),
           ),
@@ -524,6 +618,7 @@ class _HomeScreenState extends State<HomeScreen> {
     String selColor = _popColor;
     String selImage = _popImage;
     bool saving = false;
+    int statusVer = 0;
     final titleCtrl = TextEditingController(text: _popTitleCtrl.text);
     Color hex(String h) {
       try {
@@ -547,6 +642,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 // Status real overlay: bukti popup hidup/mati + izin.
                 FutureBuilder<Map<String, bool>>(
+                  key: ValueKey(statusVer),
                   future: OverlayService.overlayStatus(),
                   builder: (c, snap) {
                     final st = snap.data;
@@ -567,6 +663,55 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                 ),
+                // Preview persis pilihan saat ini (bukti sebelum save).
+                Center(
+                  child: Builder(builder: (_) {
+                    Color c;
+                    try {
+                      c = Color(int.parse(
+                          'FF${selColor.replaceAll('#', '')}',
+                          radix: 16));
+                    } catch (_) {
+                      c = Colors.cyanAccent;
+                    }
+                    Widget avatar;
+                    if (selImage.isNotEmpty &&
+                        File(selImage).existsSync()) {
+                      avatar = Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: c, width: 2),
+                          image: DecorationImage(
+                              image: FileImage(File(selImage)),
+                              fit: BoxFit.cover),
+                        ),
+                      );
+                    } else {
+                      avatar = Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: c, width: 2),
+                        ),
+                        child: Icon(popupIcons[selIcon] ?? Icons.smart_toy,
+                            color: c, size: 32),
+                      );
+                    }
+                    return Column(
+                      children: [
+                        avatar,
+                        const SizedBox(height: 4),
+                        const Text('Preview',
+                            style: TextStyle(
+                                color: Colors.white54, fontSize: 11)),
+                      ],
+                    );
+                  }),
+                ),
+                const SizedBox(height: 8),
                 const Text('Pilih ikon:',
                     style: TextStyle(color: Colors.white70, fontSize: 13)),
                 const SizedBox(height: 8),
@@ -684,6 +829,42 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Batal')),
+            TextButton(
+                onPressed: () async {
+                  try {
+                    final title = titleCtrl.text.trim().isEmpty
+                        ? OverlayService.defaultTitle
+                        : titleCtrl.text.trim();
+                    await OverlayService.saveConfig(
+                        icon: selIcon,
+                        color: selColor,
+                        title: title,
+                        image: selImage);
+                    if (mounted) {
+                      setState(() {
+                        _popIcon = selIcon;
+                        _popColor = selColor;
+                        _popTitleCtrl.text = title;
+                        _popImage = selImage;
+                      });
+                    }
+                    await OverlayService.hide();
+                    final ok = await OverlayService.show();
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(ok
+                              ? 'Popup ditampilkan ulang ✓ Sir.'
+                              : 'Popup gagal tampil. Aktifkan: Settings HP > Apps > JARVIS > Display over other apps > Allow.')));
+                      setD(() => statusVer++);
+                    }
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text('Gagal: $e')));
+                    }
+                  }
+                },
+                child: const Text('Tampilkan ulang')),
             ElevatedButton(
                 onPressed: () async {
                   // Seluruh alur dalam try: tombol tidak boleh terasa mati.

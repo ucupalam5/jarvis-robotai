@@ -68,6 +68,14 @@ class JarvisOverlayService : Service() {
     private fun prefs() =
         getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
+    /** Baca key dengan fallback prefix "flutter." (jaga-jaga beda versi plugin). */
+    private fun pref(key: String, def: String): String {
+        val p = prefs()
+        p.getString(key, null)?.let { return it }
+        p.getString("flutter.$key", null)?.let { return it }
+        return def
+    }
+
     private fun dp(v: Float): Int =
         TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics
@@ -75,7 +83,7 @@ class JarvisOverlayService : Service() {
 
     private fun accent(): Int {
         return try {
-            Color.parseColor("#" + (prefs().getString("popup_color", "00D4FF") ?: "00D4FF"))
+            Color.parseColor("#" + pref("popup_color", "00D4FF"))
         } catch (_: Exception) {
             Color.parseColor("#00D4FF")
         }
@@ -151,10 +159,9 @@ class JarvisOverlayService : Service() {
         val w = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         wm = w
         val a = accent()
-        val p = prefs()
-        val title = p.getString("popup_title", "JARVIS standby...") ?: "JARVIS standby..."
-        val iconKey = p.getString("popup_icon", "robot") ?: "robot"
-        val imgPath = p.getString("popup_image", "") ?: ""
+        val title = pref("popup_title", "JARVIS standby...")
+        val iconKey = pref("popup_icon", "robot")
+        val imgPath = pref("popup_image", "")
         val d = dp(1f)
 
         val box = LinearLayout(this).apply {
@@ -243,9 +250,11 @@ class JarvisOverlayService : Service() {
                     if (dx * dx + dy * dy < 100 &&
                         System.currentTimeMillis() - downT < 350
                     ) {
+                        // Tap popup = buka app + LANGSUNG dengar (tanpa tap orb).
                         try {
                             packageManager.getLaunchIntentForPackage(packageName)?.let {
                                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                it.putExtra("jarvis_autolisten", true)
                                 startActivity(it)
                             }
                         } catch (_: Exception) {}

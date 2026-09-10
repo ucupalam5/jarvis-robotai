@@ -31,7 +31,25 @@ class MainActivity : FlutterActivity() {
     private val PICK_REQ = 2002
     private var micResult: MethodChannel.Result? = null
     private var pickResult: MethodChannel.Result? = null
+    private var notifResult: MethodChannel.Result? = null
+    private val NOTIF_REQ = 2004
     private var hfWl: PowerManager.WakeLock? = null
+    @Volatile private var pendingAutolisten = false
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra("jarvis_autolisten", false) == true) {
+            pendingAutolisten = true
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("jarvis_autolisten", false)) {
+            pendingAutolisten = true
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -99,6 +117,14 @@ class MainActivity : FlutterActivity() {
                         val on = call.argument<Boolean>("on") ?: false
                         result.success(handsfreeWake(on))
                     }
+                    // --- Popup tap -> auto dengar (dikonsumsi sekali) ---
+                    "consumeAutolisten" -> {
+                        val v = pendingAutolisten
+                        pendingAutolisten = false
+                        result.success(if (v) "YA" else "TIDAK")
+                    }
+                    // --- Izin notifikasi (untuk notif popup di Android 13+) ---
+                    "requestNotif" -> requestNotif(result)
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
                     "accOpenSettings" -> {
@@ -359,8 +385,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun handsfreeWake(on: Boolean): String {
-        return try {
+    private fun handsfreeWake(on: Boolean): String {        return try {
             if (on) {
                 if (hfWl == null) {
                     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -412,7 +437,37 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Buka Settings HP > Apps > JARVIS > Permissions > Microphone > Allow ya Sir.")
             }
+        } else if (requestCode == NOTIF_REQ) {
+            val r = notifResult
+            notifResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Notifikasi ditolak. Popup tetap jalan, tapi tanpa notif status ya Sir.")
+            }
         }
+    }
+
+    /** Izin notifikasi Android 13+ (untuk notif status popup). */
+    private fun requestNotif(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 33) {
+            result.success("OK")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        notifResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIF_REQ
+        )
     }
 
     /** Pilih gambar galeri untuk ikon popup. Disalin ke file privat app. */
