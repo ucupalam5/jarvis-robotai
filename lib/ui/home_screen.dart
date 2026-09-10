@@ -31,9 +31,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   String _draft = '';
   final _apiCtrl = TextEditingController();
-  final _pinCtrl = TextEditingController();
   final _scroll = ScrollController();
-  String _shizuku = '...';
+  String _acc = '...';
   String _popIcon = OverlayService.defaultIcon;
   String _popColor = OverlayService.defaultColor;
   final _popTitleCtrl = TextEditingController();
@@ -59,39 +58,37 @@ class _HomeScreenState extends State<HomeScreen> {
     final k = sp.getString('groq_key') ?? '';
     widget.groq.apiKey = k;
     _apiCtrl.text = k;
-    _pinCtrl.text = sp.getString('pin') ?? '';
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
     _popTitleCtrl.text = pop['title'] ?? '';
     _popImage = pop['image'] ?? '';
     setState(() {});
-    _refreshShizuku(silent: true);
+    _refreshAcc(silent: true);
   }
 
-  Future<void> _refreshShizuku({bool silent = false}) async {
+  Future<void> _refreshAcc({bool silent = false}) async {
     String s;
     try {
-      s = await AppController.shizukuCheck();
+      s = await AppController.accCheck();
     } catch (e) {
       s = 'Gagal cek: $e';
     }
-    if (mounted) setState(() => _shizuku = s);
+    if (mounted) setState(() => _acc = s);
     if (!silent && mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Shizuku: $s')));
+          .showSnackBar(SnackBar(content: Text('Aksesibilitas: $s')));
     }
   }
 
   Future<void> _saveKey() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('groq_key', _apiCtrl.text.trim());
-    await sp.setString('pin', _pinCtrl.text.trim());
     widget.groq.apiKey = _apiCtrl.text.trim();
     if (mounted) {
       setState(() {}); // refresh banner API key
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API key + PIN tersimpan, Sir.')),
+        const SnackBar(content: Text('API key tersimpan, Sir.')),
       );
     }
   }
@@ -115,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 1) Coba perintah lokal (buka/tutup app, kunci layar, dsb) -> cepat, offline.
     final sp = await SharedPreferences.getInstance();
-    final cmd = parseLocalCommand(text, pin: sp.getString('pin') ?? '');
+    final cmd = parseLocalCommand(text);
     String reply;
     if (cmd.handledLocally) {
       reply = cmd.reply;
@@ -292,30 +289,30 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           const SizedBox(height: 8),
-          // Status Shizuku (tap = cek ulang, tahan = minta izin).
+          // Status otomatisasi (tap = cek ulang, tahan = buka pengaturan).
           GestureDetector(
-            onTap: () => _refreshShizuku(),
+            onTap: () => _refreshAcc(),
             onLongPress: () async {
-              await AppController.shizukuRequest();
-              _refreshShizuku();
+              await AppController.accOpenSettings();
+              _refreshAcc();
             },
             child: Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _shizuku == 'OK'
+                color: _acc == 'OK'
                     ? Colors.green.withOpacity(0.15)
                     : Colors.orange.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                    color: _shizuku == 'OK'
+                    color: _acc == 'OK'
                         ? Colors.greenAccent
                         : Colors.orangeAccent),
               ),
               child: Text(
-                _shizuku == 'OK'
-                    ? '● Shizuku tersambung — tap cek, tahan minta izin'
-                    : '● Shizuku: $_shizuku',
+                _acc == 'OK'
+                    ? '● Otomatisasi ON — tap cek, tahan buka pengaturan'
+                    : '● Otomatisasi: $_acc',
                 style:
                     const TextStyle(color: Colors.white70, fontSize: 11),
                 textAlign: TextAlign.center,
@@ -605,26 +602,6 @@ class _HomeScreenState extends State<HomeScreen> {
               style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.cyanAccent,
                   side: const BorderSide(color: Colors.cyanAccent)),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'PIN layar (opsional, untuk "nyalakan layar" via Shizuku).\nTersimpan di HP saja. Kosongkan bila pakai fingerprint/Smart Lock.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _pinCtrl,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'PIN, misal 123456',
-                labelStyle: TextStyle(color: Colors.white30),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.cyanAccent)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.cyanAccent)),
-              ),
             ),
           ],
         ),

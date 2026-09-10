@@ -37,17 +37,15 @@ class AppController {
   static Future<String> requestMic() => _invoke('requestMic');
   static Future<String> pickImage() => _invoke('pickImage');
 
-  // --- Shizuku (ADB tanpa root, via ShizukuHelper.kt) ---
-  static Future<String> shizukuCheck() => _invoke('shizukuCheck');
-  static Future<String> shizukuRequest() => _invoke('shizukuRequest');
-  static Future<String> shizukuExec(String cmd) =>
-      _invoke('shizukuExec', {'cmd': cmd});
-  static Future<String> shizukuWakeUnlock(String pin) =>
-      _invoke('shizukuWakeUnlock', {'pin': pin});
-  static Future<String> shizukuTap(int x, int y) =>
-      _invoke('shizukuTap', {'x': x, 'y': y});
-  static Future<String> shizukuType(String text) =>
-      _invoke('shizukuType', {'text': text});
+  // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
+  static Future<String> accCheck() => _invoke('accCheck');
+  static Future<String> accOpenSettings() => _invoke('accOpenSettings');
+  static Future<String> accTap(int x, int y) =>
+      _invoke('accTap', {'x': x, 'y': y});
+  static Future<String> accSwipeUp() => _invoke('accSwipeUp');
+  static Future<String> accType(String text) =>
+      _invoke('accType', {'text': text});
+  static Future<String> accClickSend() => _invoke('accClickSend');
   static Future<String> toggleFlashlight(bool on) =>
       _invoke('flashlight', {'on': on});
   static Future<String> setVolumeUp() => _invoke('volumeUp');

@@ -22,29 +22,14 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import rikka.shizuku.Shizuku
 import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "jarvis/control"
     private val MIC_REQ = 2001
     private val PICK_REQ = 2002
-    private val SHIZUKU_REQ = 2003
     private var micResult: MethodChannel.Result? = null
     private var pickResult: MethodChannel.Result? = null
-
-    private val shizukuListener =
-        Shizuku.OnRequestPermissionResultListener { _, _ -> }
-
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
-        try { Shizuku.addRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
-    }
-
-    override fun onDestroy() {
-        try { Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
-        super.onDestroy()
-    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -91,41 +76,30 @@ class MainActivity : FlutterActivity() {
                     }
                     "requestMic" -> requestMic(result)
                     "pickImage" -> pickImage(result)
-                    // --- Shizuku (ADB tanpa root, background thread biar tidak ANR) ---
-                    "shizukuCheck" -> result.success(shizukuStatus())
-                    "shizukuRequest" -> {
-                        ShizukuHelper.requestPermission(SHIZUKU_REQ)
-                        result.success("Permintaan izin dikirim. Cek app Shizuku ya Sir.")
+                    // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
+                    "accCheck" -> result.success(accStatus())
+                    "accOpenSettings" -> {
+                        try {
+                            val i = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(i)
+                            result.success("OK")
+                        } catch (e: Exception) {
+                            result.success("Gagal buka pengaturan: ${e.message}")
+                        }
                     }
-                    "shizukuExec" -> {
-                        val cmd = call.argument<String>("cmd") ?: ""
-                        Thread {
-                            val r = ShizukuHelper.exec(cmd)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
-                    "shizukuWakeUnlock" -> {
-                        val pin = call.argument<String>("pin") ?: ""
-                        Thread {
-                            val r = ShizukuHelper.wakeAndUnlock(pin)
-                            runOnUiThread { result.success(r) }
-                        }.start()
-                    }
-                    "shizukuTap" -> {
+                    "accTap" -> {
                         val x = call.argument<Int>("x") ?: 935
                         val y = call.argument<Int>("y") ?: 950
-                        Thread {
-                            val r = ShizukuHelper.tap(x, y)
-                            runOnUiThread { result.success(r) }
-                        }.start()
+                        result.success(JarvisAccessibilityService.tapAt(x, y))
                     }
-                    "shizukuType" -> {
+                    "accSwipeUp" -> result.success(JarvisAccessibilityService.swipeUp())
+                    "accType" -> {
                         val text = call.argument<String>("text") ?: ""
-                        Thread {
-                            val r = ShizukuHelper.typeText(text)
-                            runOnUiThread { result.success(r) }
-                        }.start()
+                        result.success(JarvisAccessibilityService.typeText(text))
                     }
+                    "accClickSend" ->
+                        result.success(JarvisAccessibilityService.clickSend())
                     else -> result.notImplemented()
                 }
             }
@@ -343,18 +317,9 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun shizukuStatus(): String {
-        return try {
-            val alive = ShizukuHelper.isBinderAlive()
-            val granted = ShizukuHelper.isGranted()
-            when {
-                !alive -> "NONAKTIF: install + Start app Shizuku (pairing WiFi, tanpa PC bisa)."
-                !granted -> "BELUM_IZIN: Shizuku > Authorized apps > izinkan com.jarvis.robotai."
-                else -> "OK"
-            }
-        } catch (e: Exception) {
-            "Gagal cek Shizuku: ${e.message}"
-        }
+    private fun accStatus(): String {
+        return if (JarvisAccessibilityService.isEnabled()) "OK"
+        else "BELUM: aktifkan di Settings HP > Accessibility > Jarvis > ON."
     }
 
     /** Minta izin microphone saat user tap orb (tanpa plugin tambahan). */

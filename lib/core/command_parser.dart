@@ -60,7 +60,7 @@ const Map<String, String> appMap = {
   'playstore': 'com.android.vending',
 };
 
-ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
+ParsedCommand parseLocalCommand(String rawText) {
   final t = rawText.toLowerCase().trim();
 
   // --- BUKA APLIKASI: "buka whatsapp", "open youtube", "tolong bukain ig" ---
@@ -109,37 +109,41 @@ ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
   }
 
   // --- NYALAKAN LAYAR (layar-mati, bukan mati total).
-  // Via Shizuku bila tersambung (bisa swipe + coba PIN),
-  // else fallback WakeLock biasa (hanya nyalakan layar).
+  // Nyalakan via WakeLock + coba swipe buka kunci geser.
+  // PIN/fingerprint tetap manual (blokir keamanan Android).
   if (t.contains('nyalakan layar') ||
       t.contains('nyalakan hp') ||
       t.contains('hidupkan layar') ||
       t.contains('bangun') ||
       t.contains('wake up')) {
-    final p = pin;
     return ParsedCommand(
       handledLocally: true,
       reply: 'Menyalakan layar, Sir.',
       action: () async {
-        final s = await AppController.shizukuCheck();
-        if (s == 'OK') return AppController.shizukuWakeUnlock(p);
-        return AppController.wakeUp();
+        await AppController.wakeUp();
+        await Future.delayed(const Duration(milliseconds: 900));
+        return AppController.accSwipeUp();
       },
     );
   }
 
-  // --- SHIZUKU: tap tombol kirim (misal tombol Kirim WA kanan bawah) ---
+  // --- TAP TOMBOL KIRIM (misal tombol Kirim WA): cari label, fallback tap.
   if (t.contains('tap kirim') ||
       t.contains('tekan kirim') ||
-      t.contains('klik kirim')) {
+      t.contains('klik kirim') ||
+      t.contains('kirim pesan ini')) {
     return ParsedCommand(
       handledLocally: true,
-      reply: 'Men-tap tombol kirim via Shizuku, Sir.',
-      action: () => AppController.shizukuTap(935, 950),
+      reply: 'Menekan tombol kirim, Sir.',
+      action: () async {
+        final r = await AppController.accClickSend();
+        if (r == 'OK') return 'OK';
+        return AppController.accTap(935, 950);
+      },
     );
   }
 
-  // --- SHIZUKU: ketik teks otomatis: "ketik halo bro" ---
+  // --- KETIK OTOMATIS: "ketik halo bro" (ke kolom chat yang fokus) ---
   if (t.startsWith('ketik ') || t.startsWith('ketikkan ')) {
     final txt =
         rawText.replaceFirst(RegExp(r'(?i)^(ketik|ketikkan)\s+'), '').trim();
@@ -149,8 +153,8 @@ ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
     }
     return ParsedCommand(
       handledLocally: true,
-      reply: 'Mengetik via Shizuku, Sir.',
-      action: () => AppController.shizukuType(txt),
+      reply: 'Mengetik ke kolom chat, Sir. Tap kolom dulu bila gagal.',
+      action: () => AppController.accType(txt),
     );
   }
 
