@@ -67,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await sp.setString('groq_key', _apiCtrl.text.trim());
     widget.groq.apiKey = _apiCtrl.text.trim();
     if (mounted) {
+      setState(() {}); // refresh banner API key
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('API key Groq tersimpan, Sir.')),
       );
@@ -131,12 +132,27 @@ class _HomeScreenState extends State<HomeScreen> {
       _listening = true;
       _draft = 'Mendengarkan...';
     });
+    final start = DateTime.now();
     await widget.voice.listenOnce(onResult: (txt, finalR) async {
+      if (!mounted) return;
       setState(() => _draft = txt.isEmpty ? 'Mendengarkan...' : txt);
       if (finalR) {
         await widget.voice.stopListen();
         if (mounted) setState(() => _listening = false);
-        if (txt.trim().isNotEmpty) await _handleText(txt);
+        if (txt.trim().isNotEmpty) {
+          await _handleText(txt);
+        } else if (DateTime.now().difference(start).inMilliseconds > 1500) {
+          // Bukan tap-batal (user bicara tapi tak tertangkap): beri penuntun.
+          final mic = await widget.voice.hasMicPermission;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              duration: const Duration(seconds: 5),
+              content: Text(mic
+                  ? 'Tidak dengar suara, Sir. Bicara lebih dekat + keras, atau install paket suara Indonesia di Settings HP > Bahasa.'
+                  : 'Izin microphone ditolak, Sir. Buka Settings HP > Apps > JARVIS > Permissions > Microphone > Allow.'),
+            ));
+          }
+        }
       }
     });
     // timeout pengaman 16 detik
@@ -182,6 +198,25 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          // Banner penuntun API key: muncul sampai user pasang key.
+          if (widget.groq.apiKey.isEmpty)
+            GestureDetector(
+              onTap: _openSettings,
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orangeAccent),
+                ),
+                child: const Text(
+                  '⚠ API key Groq belum dipasang, Sir.\nTap di sini > paste key gsk_... > Save.\nDaftar gratis: console.groq.com',
+                  style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
           GestureDetector(
             onTap: _busy ? null : _tapOrb,
@@ -413,6 +448,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 focusedBorder: OutlineInputBorder(
                     borderSide: BorderSide(color: Colors.cyanAccent)),
               ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => widget.voice.speak('Halo Sir, suara Jarvis terdengar jelas.'),
+              icon: const Icon(Icons.volume_up, size: 16),
+              label: const Text('Tes suara',
+                  style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent)),
             ),
           ],
         ),

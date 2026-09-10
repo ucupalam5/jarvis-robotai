@@ -48,12 +48,25 @@ class _JarvisBootstrapState extends State<JarvisBootstrap> {
   }
 
   Future<void> _init() async {
-    await voice.initTts();
-    await voice.initStt();
-    // API key dibaca dari TextField di Home (disimpan SharedPreferences).
-    // Default kosong -> user isi di Settings.
+    // FAILSAFE: apapun yang terjadi (STT/TTS macet di HP tertentu),
+    // aplikasi wajib masuk Home maksimal 12 detik. Tidak boleh loading selamanya.
+    Future.delayed(const Duration(seconds: 12), () {
+      if (mounted && !ready) setState(() => ready = true);
+    });
+    try {
+      await voice.initTts().timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // TTS gagal -> app tetap jalan, Jarvis hanya tidak bersuara.
+    }
+    try {
+      await voice.initStt().timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // STT gagal -> app tetap jalan, user bisa ketik via tombol cepat.
+    }
+    // API key dibaca dari Settings di Home (disimpan SharedPreferences).
+    // Default kosong -> user isi di Settings (ada banner penuntun).
     groq = GroqService('');
-    setState(() => ready = true);
+    if (mounted) setState(() => ready = true);
   }
 
   @override
