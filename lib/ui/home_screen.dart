@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
 import '../core/groq_service.dart';
+import '../core/overlay_service.dart';
 import '../core/voice_service.dart';
 import 'jarvis_orb.dart';
 
@@ -136,6 +137,17 @@ class _HomeScreenState extends State<HomeScreen> {
             style: TextStyle(color: Colors.cyanAccent, letterSpacing: 1.2)),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_in_picture, color: Colors.cyanAccent),
+            tooltip: 'Popup robot',
+            onPressed: () async {
+              await OverlayService.show();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Popup Jarvis aktif, Sir. Bisa digeser-geser.')));
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.cyanAccent),
             onPressed: _openSettings,
