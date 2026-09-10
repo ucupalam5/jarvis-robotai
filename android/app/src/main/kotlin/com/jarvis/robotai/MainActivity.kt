@@ -5,10 +5,15 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.net.Uri
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.PowerManager
+import android.provider.AlarmClock
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -35,6 +40,30 @@ class MainActivity : FlutterActivity() {
                     "volumeUp" -> result.success(volume(1))
                     "volumeDown" -> result.success(volume(-1))
                     "wakeUp" -> result.success(wakeUp())
+                    "getBattery" -> result.success(getBattery())
+                    "setAlarm" -> {
+                        val h = call.argument<Int>("hour") ?: -1
+                        val m = call.argument<Int>("minute") ?: 0
+                        val label = call.argument<String>("label") ?: "Jarvis"
+                        result.success(setAlarm(h, m, label))
+                    }
+                    "dial" -> {
+                        val n = call.argument<String>("number") ?: ""
+                        result.success(dial(n))
+                    }
+                    "sms" -> {
+                        val n = call.argument<String>("number") ?: ""
+                        val b = call.argument<String>("body") ?: ""
+                        result.success(sms(n, b))
+                    }
+                    "webSearch" -> {
+                        val q = call.argument<String>("query") ?: ""
+                        result.success(webSearch(q))
+                    }
+                    "openSettingsPage" -> {
+                        val p = call.argument<String>("page") ?: ""
+                        result.success(openSettingsPage(p))
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -158,6 +187,97 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal menyalakan layar: ${e.message}"
+        }
+    }
+
+    private fun getBattery(): String {
+        return try {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+            "BATERAI:$pct:${if (charging) 1 else 0}"
+        } catch (e: Exception) {
+            "Gagal baca baterai: ${e.message}"
+        }
+    }
+
+    private fun setAlarm(hour: Int, minute: Int, label: String): String {
+        if (hour !in 0..23 || minute !in 0..59) return "Jam tidak valid, Sir."
+        return try {
+            val i = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+                putExtra(AlarmClock.EXTRA_HOUR, hour)
+                putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                putExtra(AlarmClock.EXTRA_MESSAGE, label)
+                putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal pasang alarm: ${e.message}"
+        }
+    }
+
+    private fun dial(number: String): String {
+        val digits = number.filter { it.isDigit() || it == '+' }
+        return try {
+            val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$digits"))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal membuka dialer: ${e.message}"
+        }
+    }
+
+    private fun sms(number: String, body: String): String {
+        val digits = number.filter { it.isDigit() || it == '+' }
+        if (digits.length < 6) return "Nomor tidak valid, Sir."
+        return try {
+            val i = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$digits")).apply {
+                putExtra("sms_body", body)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal membuka SMS: ${e.message}"
+        }
+    }
+
+    private fun webSearch(query: String): String {
+        if (query.isBlank()) return "Mau cari apa, Sir?"
+        return try {
+            val url = "https://www.google.com/search?q=" + Uri.encode(query)
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal membuka browser: ${e.message}"
+        }
+    }
+
+    private fun openSettingsPage(page: String): String {
+        return try {
+            val action = when (page) {
+                "wifi" -> Settings.ACTION_WIFI_SETTINGS
+                "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+                "display" -> Settings.ACTION_DISPLAY_SETTINGS
+                "sound" -> Settings.ACTION_SOUND_SETTINGS
+                "battery" -> Settings.ACTION_BATTERY_SAVER_SETTINGS
+                "apps" -> Settings.ACTION_APPLICATION_SETTINGS
+                else -> Settings.ACTION_SETTINGS
+            }
+            val i = Intent(action)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal membuka pengaturan: ${e.message}"
         }
     }
 }

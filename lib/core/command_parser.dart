@@ -123,6 +123,150 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
+  // --- BATERAI: "baterai berapa" ---
+  if (t.contains('baterai') || t.contains('battery') || t.contains('batre')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek baterai, Sir.',
+      action: () async {
+        final r = await AppController.getBattery();
+        // Format native: BATERAI:85:1
+        final m = RegExp(r'BATERAI:(\d+):(\d)').firstMatch(r);
+        if (m != null) {
+          final pct = m.group(1);
+          final chg = m.group(2) == '1' ? ' dan sedang mengisi daya' : '';
+          return 'BATERAI_REPLY:Baterai tersisa $pct persen$chg, Sir.';
+        }
+        return r;
+      },
+    );
+  }
+
+  // --- JAM / TANGGAL (murni Dart, tanpa native) ---
+  if (t.contains('jam berapa') || t == 'jam' || t.contains('pukul berapa')) {
+    final now = DateTime.now();
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Sekarang jam $hh lewat $mm, Sir.',
+    );
+  }
+  if (t.contains('tanggal berapa') ||
+      t.contains('hari apa') ||
+      t.contains('tanggal hari ini')) {
+    const hari = [
+      'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'
+    ];
+    const bulan = [
+      '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    final now = DateTime.now();
+    return ParsedCommand(
+      handledLocally: true,
+      reply:
+          'Hari ini ${hari[now.weekday - 1]}, tanggal ${now.day} ${bulan[now.month]} ${now.year}, Sir.',
+    );
+  }
+
+  // --- ALARM: "pasang alarm jam 6 pagi" / "alarm jam 7 malam" ---
+  if (t.contains('alarm')) {
+    final num = RegExp(r'(\d{1,2})(?:[:.](\d{2}))?').firstMatch(t);
+    if (num != null) {
+      var h = int.parse(num.group(1)!);
+      var m = num.group(2) != null ? int.parse(num.group(2)!) : 0;
+      if (t.contains('siang') || t.contains('sore') || t.contains('malam')) {
+        if (h < 12) h += 12;
+        if (h == 24) h = 12;
+      }
+      if (h > 23 || m > 59) {
+        return ParsedCommand(
+            handledLocally: true, reply: 'Jam alarm tidak valid, Sir.');
+      }
+      final hh = h;
+      final mm = m;
+      final label =
+          'Jarvis ${hh.toString().padLeft(2, '0')}:${mm.toString().padLeft(2, '0')}';
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Siap Sir, membuka jam untuk alarm $label.',
+        action: () => AppController.setAlarm(hh, mm, label),
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Sir, jam berapa alarmnya? Contoh: pasang alarm jam 6 pagi.',
+    );
+  }
+
+  // --- TELEPON: "telpon 0812..." (buka dialer, tanpa izin CALL_PHONE) ---
+  if (t.startsWith('telpon') ||
+      t.startsWith('telepon') ||
+      t.startsWith('call ') ||
+      t.contains('hubungi ')) {
+    final digits = RegExp(r'\+?\d[\d ]{5,}').firstMatch(t)?.group(0) ?? '';
+    if (digits.replaceAll(RegExp(r'\D'), '').length >= 6) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Membuka dialer, Sir.',
+        action: () => AppController.dial(digits),
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Sir, nomornya berapa? Contoh: telpon 081234567890.',
+    );
+  }
+
+  // --- SMS: "sms ke 0812 pesannya halo" ---
+  if (t.startsWith('sms') || t.contains('kirim sms')) {
+    final numM = RegExp(r'(\+?\d[\d ]{5,})').firstMatch(t);
+    final bodyM = RegExp(r'(pesannya|isinya|pesan)\s+(.+)').firstMatch(t);
+    final num = numM?.group(1) ?? '';
+    final body = bodyM?.group(2) ?? 'Halo, ini Jarvis Sir.';
+    if (num.replaceAll(RegExp(r'\D'), '').length >= 6) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Membuka SMS, Sir. Tinggal tap kirim.',
+        action: () => AppController.sms(num, body),
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Sir, contohnya: sms ke 081234567890 pesannya halo bro.',
+    );
+  }
+
+  // --- CARI GOOGLE: "cari resep rendang" / "search ..." ---
+  if (t.startsWith('cari ') || t.startsWith('carikan ') || t.startsWith('search ')) {
+    final q = t
+        .replaceFirst(RegExp(r'^(cari|carikan|search)\s+'), '')
+        .replaceAll(RegExp(r'\s+di google\s*$'), '')
+        .trim();
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencari $q di Google, Sir.',
+      action: () => AppController.webSearch(q),
+    );
+  }
+
+  // --- PENGATURAN CEPAT: "pengaturan wifi" ---
+  if (t.contains('wifi')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka pengaturan WiFi, Sir.',
+      action: () => AppController.openSettingsPage('wifi'),
+    );
+  }
+  if (t.contains('bluetooth') || t.contains('blutut')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka pengaturan Bluetooth, Sir.',
+      action: () => AppController.openSettingsPage('bluetooth'),
+    );
+  }
+
   // --- KUNCI / MATIKAN LAYAR ---
   if ((t.contains('kunci') && t.contains('layar')) ||
       t.contains('matikan layar') ||

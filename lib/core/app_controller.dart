@@ -23,6 +23,17 @@ class AppController {
   static Future<String> goHome() => _invoke('goHome');
   static Future<String> lockScreen() => _invoke('lockScreen');
   static Future<String> wakeUp() => _invoke('wakeUp');
+  static Future<String> getBattery() => _invoke('getBattery');
+  static Future<String> setAlarm(int hour, int minute, String label) =>
+      _invoke('setAlarm', {'hour': hour, 'minute': minute, 'label': label});
+  static Future<String> dial(String number) =>
+      _invoke('dial', {'number': number});
+  static Future<String> sms(String number, String body) =>
+      _invoke('sms', {'number': number, 'body': body});
+  static Future<String> webSearch(String query) =>
+      _invoke('webSearch', {'query': query});
+  static Future<String> openSettingsPage(String page) =>
+      _invoke('openSettingsPage', {'page': page});
   static Future<String> toggleFlashlight(bool on) =>
       _invoke('flashlight', {'on': on});
   static Future<String> setVolumeUp() => _invoke('volumeUp');
