@@ -1,0 +1,35 @@
+# GitLab CI — build APK tanpa GitHub / tanpa OAuth GitHub.
+# Cara dari HP: gitlab.com > akun baru via EMAIL (jangan via GitHub) > New project blank
+# > upload isi zip ini via web > pipeline jalan otomatis > download app-release.apk.
+image: cirrusci/flutter:stable
+
+variables:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+
+stages:
+  - build
+
+before_script:
+  - flutter doctor -v
+  - java -version
+  - if [ ! -f .env ] && [ -f .env.example ]; then cp .env.example .env; fi
+  - flutter pub get
+
+build:apk:
+  stage: build
+  tags:
+    - saas-linux-medium-amd64
+  script:
+    - flutter analyze || true
+    - flutter build apk --release -v
+    - ls -lh build/app/outputs/flutter-apk/
+  artifacts:
+    name: jarvis-app-release
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk
+    expire_in: 2 weeks
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
