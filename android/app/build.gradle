@@ -23,6 +23,12 @@ android {
         versionName = "1.0.0"
     }
 
+    dependencies {
+        // Shizuku: perintah level-ADB tanpa root (tap, ketik, dsb).
+        implementation("dev.rikka.shizuku:api:13.1.5")
+        implementation("dev.rikka.shizuku:provider:13.1.5")
+    }
+
     buildTypes {
         release { signingConfig = signingConfigs.debug }
     }

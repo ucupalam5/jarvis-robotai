@@ -31,10 +31,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   String _draft = '';
   final _apiCtrl = TextEditingController();
+  final _pinCtrl = TextEditingController();
   final _scroll = ScrollController();
+  String _shizuku = '...';
   String _popIcon = OverlayService.defaultIcon;
   String _popColor = OverlayService.defaultColor;
   final _popTitleCtrl = TextEditingController();
+  String _popImage = '';
+  double _level = 0;
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -55,21 +59,39 @@ class _HomeScreenState extends State<HomeScreen> {
     final k = sp.getString('groq_key') ?? '';
     widget.groq.apiKey = k;
     _apiCtrl.text = k;
+    _pinCtrl.text = sp.getString('pin') ?? '';
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
     _popTitleCtrl.text = pop['title'] ?? '';
+    _popImage = pop['image'] ?? '';
     setState(() {});
+    _refreshShizuku(silent: true);
+  }
+
+  Future<void> _refreshShizuku({bool silent = false}) async {
+    String s;
+    try {
+      s = await AppController.shizukuCheck();
+    } catch (e) {
+      s = 'Gagal cek: $e';
+    }
+    if (mounted) setState(() => _shizuku = s);
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Shizuku: $s')));
+    }
   }
 
   Future<void> _saveKey() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('groq_key', _apiCtrl.text.trim());
+    await sp.setString('pin', _pinCtrl.text.trim());
     widget.groq.apiKey = _apiCtrl.text.trim();
     if (mounted) {
       setState(() {}); // refresh banner API key
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API key Groq tersimpan, Sir.')),
+        const SnackBar(content: Text('API key + PIN tersimpan, Sir.')),
       );
     }
   }
@@ -92,7 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollDown();
 
     // 1) Coba perintah lokal (buka/tutup app, kunci layar, dsb) -> cepat, offline.
-    final cmd = parseLocalCommand(text);
+    final sp = await SharedPreferences.getInstance();
+    final cmd = parseLocalCommand(text, pin: sp.getString('pin') ?? '');
     String reply;
     if (cmd.handledLocally) {
       reply = cmd.reply;
@@ -128,9 +151,23 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     await widget.voice.stopSpeak();
+    // Minta izin mic eksplisit (tanpa plugin tambahan) sebelum dengar.
+    final mic = await AppController.requestMic();
+    if (mic != 'OK') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(mic.startsWith('DENIED:')
+              ? mic.substring('DENIED:'.length)
+              : mic),
+        ));
+      }
+      return;
+    }
     setState(() {
       _listening = true;
       _draft = 'Mendengarkan...';
+      _level = 0;
     });
     final start = DateTime.now();
     await widget.voice.listenOnce(onResult: (txt, finalR) async {
@@ -138,7 +175,10 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _draft = txt.isEmpty ? 'Mendengarkan...' : txt);
       if (finalR) {
         await widget.voice.stopListen();
-        if (mounted) setState(() => _listening = false);
+        if (mounted) setState(() {
+          _listening = false;
+          _level = 0;
+        });
         if (txt.trim().isNotEmpty) {
           await _handleText(txt);
         } else if (DateTime.now().difference(start).inMilliseconds > 1500) {
@@ -153,6 +193,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ));
           }
         }
+      }
+    }, onLevel: (v) {
+      // Meter mic: update hemat (hanya bila berubah cukup besar).
+      if (mounted && (v - _level).abs() > 0.06) {
+        setState(() => _level = v);
       }
     });
     // timeout pengaman 16 detik
@@ -177,10 +222,13 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.picture_in_picture, color: Colors.cyanAccent),
             tooltip: 'Popup robot',
             onPressed: () async {
-              await OverlayService.show();
+              final ok = await OverlayService.show();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Popup Jarvis aktif, Sir. Bisa digeser-geser.')));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    duration: const Duration(seconds: 5),
+                    content: Text(ok
+                        ? 'Popup Jarvis aktif, Sir. Bisa digeser-geser.'
+                        : 'Popup gagal tampil, Sir. Aktifkan manual: Settings HP > Apps > JARVIS > Display over other apps > Allow.')));
               }
             },
           ),
@@ -231,7 +279,50 @@ class _HomeScreenState extends State<HomeScreen> {
                     : 'TAP ORB UNTUK BICARA',
             style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
           ),
+          // Meter level mic: membuktikan mic hidup saat mendengarkan.
+          if (_listening)
+            Container(
+              width: 200,
+              padding: const EdgeInsets.only(top: 6),
+              child: LinearProgressIndicator(
+                value: _level <= 0.01 ? null : _level,
+                backgroundColor: Colors.white10,
+                color: Colors.cyanAccent,
+                minHeight: 4,
+              ),
+            ),
           const SizedBox(height: 8),
+          // Status Shizuku (tap = cek ulang, tahan = minta izin).
+          GestureDetector(
+            onTap: () => _refreshShizuku(),
+            onLongPress: () async {
+              await AppController.shizukuRequest();
+              _refreshShizuku();
+            },
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _shizuku == 'OK'
+                    ? Colors.green.withOpacity(0.15)
+                    : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: _shizuku == 'OK'
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent),
+              ),
+              child: Text(
+                _shizuku == 'OK'
+                    ? '● Shizuku tersambung — tap cek, tahan minta izin'
+                    : '● Shizuku: $_shizuku',
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           // Tombol cepat
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -245,6 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _quick('Kunci layar', () => _handleText('kunci layar')),
                 _quick('Nyalakan layar', () => _handleText('nyalakan layar')),
                 _quick('Senter ON', () => _handleText('nyalakan senter')),
+                _quick('Baterai', () => _handleText('baterai berapa')),
               ],
             ),
           ),
@@ -299,6 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openPopupSettings() {
     String selIcon = _popIcon;
     String selColor = _popColor;
+    String selImage = _popImage;
     final titleCtrl = TextEditingController(text: _popTitleCtrl.text);
     Color hex(String h) {
       try {
@@ -389,6 +482,47 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderSide: BorderSide(color: Colors.cyanAccent)),
                   ),
                 ),
+                const SizedBox(height: 4),
+                const Text('Atau gambar dari galeri (gantikan ikon):',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final r = await AppController.pickImage();
+                          if (r == 'BATAL') return;
+                          if (r.startsWith('/')) {
+                            setD(() => selImage = r);
+                          } else if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(content: Text(r)));
+                          }
+                        },
+                        icon: const Icon(Icons.photo, size: 16),
+                        label: Text(
+                            selImage.isEmpty ? 'Dari galeri' : 'Ganti gambar',
+                            style: const TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.cyanAccent,
+                            side: const BorderSide(color: Colors.cyanAccent)),
+                      ),
+                    ),
+                    if (selImage.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Hapus gambar, kembali ke ikon',
+                        icon: const Icon(Icons.delete_outline,
+                            color: Colors.orangeAccent),
+                        onPressed: () => setD(() => selImage = ''),
+                      ),
+                    ],
+                  ],
+                ),
+                if (selImage.isNotEmpty)
+                  const Text('✓ Gambar galeri dipilih.',
+                      style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
               ],
             ),
           ),
@@ -401,18 +535,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   final title = titleCtrl.text.trim().isEmpty
                       ? OverlayService.defaultTitle
                       : titleCtrl.text.trim();
-                  await OverlayService.saveConfig(
-                      icon: selIcon, color: selColor, title: title);
-                  if (mounted) {
-                    setState(() {
-                      _popIcon = selIcon;
-                      _popColor = selColor;
-                      _popTitleCtrl.text = title;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Ikon popup tersimpan, Sir.')));
+                  try {
+                    await OverlayService.saveConfig(
+                        icon: selIcon,
+                        color: selColor,
+                        title: title,
+                        image: selImage);
+                    if (mounted) {
+                      setState(() {
+                        _popIcon = selIcon;
+                        _popColor = selColor;
+                        _popTitleCtrl.text = title;
+                        _popImage = selImage;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('Ikon popup tersimpan, Sir.')));
+                    }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text('Gagal simpan: $e')));
+                    }
                   }
-                  if (ctx.mounted) Navigator.pop(ctx);
                 },
                 child: const Text('Save')),
           ],
@@ -458,6 +605,26 @@ class _HomeScreenState extends State<HomeScreen> {
               style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.cyanAccent,
                   side: const BorderSide(color: Colors.cyanAccent)),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'PIN layar (opsional, untuk "nyalakan layar" via Shizuku).\nTersimpan di HP saja. Kosongkan bila pakai fingerprint/Smart Lock.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _pinCtrl,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'PIN, misal 123456',
+                labelStyle: TextStyle(color: Colors.white30),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+              ),
             ),
           ],
         ),

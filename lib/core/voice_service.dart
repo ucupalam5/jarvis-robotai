@@ -81,10 +81,12 @@ class VoiceService {
   }
 
   /// Dengar sekali (bukan continuous). Callback onResult dipanggil saat final.
+  /// onLevel menerima 0..1 level suara mic (untuk meter di UI).
   /// Mengembalikan '' + final=true bila: izin mic ditolak / STT tak tersedia /
   /// locale gagal — UI wajib menampilkan pesan penuntun (lihat home_screen).
   Future<void> listenOnce({
     required void Function(String text, bool finalResult) onResult,
+    void Function(double level)? onLevel,
   }) async {
     bool ok = false;
     try {
@@ -106,6 +108,13 @@ class VoiceService {
         listenFor: const Duration(seconds: 15),
         pauseFor: const Duration(seconds: 3),
         partialResults: true,
+        onSoundLevelChange: onLevel == null
+            ? null
+            : (level) {
+                // level bisa negatif; normalisasi kasar ke 0..1.
+                final v = ((level + 2) / 30).clamp(0.0, 1.0);
+                onLevel(v);
+              },
       );
     } catch (_) {
       isListening = false;

@@ -1,8 +1,9 @@
 // Entry point overlay - widget robot melayang di atas aplikasi lain.
 // Dipanggil oleh flutter_overlay_window via @pragma('vm:entry-point').
-// Tampilan (ikon/warna/teks) dibaca dari SharedPreferences + live-update
-// lewat FlutterOverlayWindow.shareData (JSON string).
+// Tampilan (ikon/warna/teks/gambar galeri) dibaca dari SharedPreferences +
+// live-update lewat FlutterOverlayWindow.shareData (JSON string).
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -44,6 +45,7 @@ class _JarvisOverlayAppState extends State<JarvisOverlayApp> {
   String _icon = 'robot';
   String _color = '00D4FF';
   String _title = 'JARVIS standby...';
+  String _image = '';
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _JarvisOverlayAppState extends State<JarvisOverlayApp> {
               _icon = (m['icon'] as String?) ?? _icon;
               _color = (m['color'] as String?) ?? _color;
               _title = (m['title'] as String?) ?? _title;
+              _image = (m['image'] as String?) ?? _image;
             });
           }
         } catch (_) {}
@@ -74,11 +77,40 @@ class _JarvisOverlayAppState extends State<JarvisOverlayApp> {
           _icon = sp.getString('popup_icon') ?? _icon;
           _color = sp.getString('popup_color') ?? _color;
           _title = sp.getString('popup_title') ?? _title;
+          _image = sp.getString('popup_image') ?? _image;
         });
       }
     } catch (_) {}
   }
 
+  /// Gambar galeri bila ada & file masih ada, else ikon bawaan.
+  Widget _avatar(Color accent) {
+    if (_image.isNotEmpty) {
+      try {
+        final f = File(_image);
+        if (f.existsSync()) {
+          return Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: accent, width: 2),
+              image: DecorationImage(image: FileImage(f), fit: BoxFit.cover),
+            ),
+          );
+        }
+      } catch (_) {}
+    }
+    return Container(
+      width: 70,
+      height: 70,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: accent, width: 2),
+      ),
+      child: Icon(popupIcons[_icon] ?? Icons.smart_toy,
+          color: accent, size: 36),
+    );
   @override
   Widget build(BuildContext context) {
     final accent = _hexColor(_color);
@@ -104,16 +136,7 @@ class _JarvisOverlayAppState extends State<JarvisOverlayApp> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: accent, width: 2),
-                  ),
-                  child: Icon(popupIcons[_icon] ?? Icons.smart_toy,
-                      color: accent, size: 36),
-                ),
+                _avatar(accent),
                 const SizedBox(height: 8),
                 Text(
                   _title,

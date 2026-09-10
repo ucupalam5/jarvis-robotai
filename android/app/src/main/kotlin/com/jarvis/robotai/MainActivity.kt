@@ -1,11 +1,14 @@
 package com.jarvis.robotai
 
+import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
@@ -14,12 +17,34 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.AlarmClock
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import rikka.shizuku.Shizuku
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "jarvis/control"
+    private val MIC_REQ = 2001
+    private val PICK_REQ = 2002
+    private val SHIZUKU_REQ = 2003
+    private var micResult: MethodChannel.Result? = null
+    private var pickResult: MethodChannel.Result? = null
+
+    private val shizukuListener =
+        Shizuku.OnRequestPermissionResultListener { _, _ -> }
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        try { Shizuku.addRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
+    }
+
+    override fun onDestroy() {
+        try { Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Exception) {}
+        super.onDestroy()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -63,6 +88,43 @@ class MainActivity : FlutterActivity() {
                     "openSettingsPage" -> {
                         val p = call.argument<String>("page") ?: ""
                         result.success(openSettingsPage(p))
+                    }
+                    "requestMic" -> requestMic(result)
+                    "pickImage" -> pickImage(result)
+                    // --- Shizuku (ADB tanpa root, background thread biar tidak ANR) ---
+                    "shizukuCheck" -> result.success(shizukuStatus())
+                    "shizukuRequest" -> {
+                        ShizukuHelper.requestPermission(SHIZUKU_REQ)
+                        result.success("Permintaan izin dikirim. Cek app Shizuku ya Sir.")
+                    }
+                    "shizukuExec" -> {
+                        val cmd = call.argument<String>("cmd") ?: ""
+                        Thread {
+                            val r = ShizukuHelper.exec(cmd)
+                            runOnUiThread { result.success(r) }
+                        }.start()
+                    }
+                    "shizukuWakeUnlock" -> {
+                        val pin = call.argument<String>("pin") ?: ""
+                        Thread {
+                            val r = ShizukuHelper.wakeAndUnlock(pin)
+                            runOnUiThread { result.success(r) }
+                        }.start()
+                    }
+                    "shizukuTap" -> {
+                        val x = call.argument<Int>("x") ?: 935
+                        val y = call.argument<Int>("y") ?: 950
+                        Thread {
+                            val r = ShizukuHelper.tap(x, y)
+                            runOnUiThread { result.success(r) }
+                        }.start()
+                    }
+                    "shizukuType" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        Thread {
+                            val r = ShizukuHelper.typeText(text)
+                            runOnUiThread { result.success(r) }
+                        }.start()
                     }
                     else -> result.notImplemented()
                 }
@@ -278,6 +340,90 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal membuka pengaturan: ${e.message}"
+        }
+    }
+
+    private fun shizukuStatus(): String {
+        return try {
+            val alive = ShizukuHelper.isBinderAlive()
+            val granted = ShizukuHelper.isGranted()
+            when {
+                !alive -> "NONAKTIF: install + Start app Shizuku (pairing WiFi, tanpa PC bisa)."
+                !granted -> "BELUM_IZIN: Shizuku > Authorized apps > izinkan com.jarvis.robotai."
+                else -> "OK"
+            }
+        } catch (e: Exception) {
+            "Gagal cek Shizuku: ${e.message}"
+        }
+    }
+
+    /** Minta izin microphone saat user tap orb (tanpa plugin tambahan). */
+    private fun requestMic(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        micResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.RECORD_AUDIO), MIC_REQ
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == MIC_REQ) {
+            val r = micResult
+            micResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Buka Settings HP > Apps > JARVIS > Permissions > Microphone > Allow ya Sir.")
+            }
+        }
+    }
+
+    /** Pilih gambar galeri untuk ikon popup. Disalin ke file privat app. */
+    private fun pickImage(result: MethodChannel.Result) {
+        pickResult = result
+        try {
+            val i = Intent(Intent.ACTION_PICK)
+            i.type = "image/*"
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, PICK_REQ)
+        } catch (e: Exception) {
+            pickResult = null
+            result.success("Galeri tidak tersedia: ${e.message}")
+        }
+    }
+
+    @Deprecated("dipakai untuk galeri picker")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_REQ) {
+            val r = pickResult
+            pickResult = null
+            if (r == null) return
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                try {
+                    val out = File(filesDir, "popup_icon.png")
+                    contentResolver.openInputStream(data.data!!)?.use { inp ->
+                        out.outputStream().use { o -> inp.copyTo(o) }
+                    }
+                    r.success(out.absolutePath)
+                } catch (e: Exception) {
+                    r.success("Gagal salin gambar: ${e.message}")
+                }
+            } else {
+                r.success("BATAL")
+            }
         }
     }
 }

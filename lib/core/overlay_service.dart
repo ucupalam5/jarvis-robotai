@@ -11,6 +11,7 @@ class OverlayService {
   static const String kIcon = 'popup_icon';
   static const String kColor = 'popup_color';
   static const String kTitle = 'popup_title';
+  static const String kImage = 'popup_image'; // path file galeri, '' = pakai ikon
 
   static const String defaultIcon = 'robot';
   static const String defaultColor = '00D4FF';
@@ -25,26 +26,32 @@ class OverlayService {
     return true;
   }
 
-  static Future<void> show() async {
-    if (!await ensurePermission()) return;
+  /// true bila popup benar-benar tampil. false = izin overlay belum diberi.
+  static Future<bool> show() async {
+    if (!await ensurePermission()) return false;
     if (await FlutterOverlayWindow.isActive()) {
       // Sudah aktif: kirim config terbaru saja biar tampilannya refresh.
       await pushConfig();
-      return;
+      return true;
     }
-    await FlutterOverlayWindow.showOverlay(
-      enableDrag: true,
-      overlayTitle: 'JARVIS standby',
-      overlayContent: 'Tap untuk perintah suara',
-      flag: OverlayFlag.defaultFlag,
-      visibility: NotificationVisibility.visibilityPublic,
-      positionGravity: PositionGravity.right,
-      height: 220,
-      width: 200,
-      startPosition: const OverlayPosition(0, -200),
-    );
+    try {
+      await FlutterOverlayWindow.showOverlay(
+        enableDrag: true,
+        overlayTitle: 'JARVIS standby',
+        overlayContent: 'Tap untuk perintah suara',
+        flag: OverlayFlag.defaultFlag,
+        visibility: NotificationVisibility.visibilityPublic,
+        positionGravity: PositionGravity.right,
+        height: 220,
+        width: 200,
+        startPosition: const OverlayPosition(0, -200),
+      );
+    } catch (_) {
+      return false;
+    }
     // Kirim tampilan tersimpan begitu overlay siap.
     Future.delayed(const Duration(seconds: 1), pushConfig);
+    return await FlutterOverlayWindow.isActive();
   }
 
   static Future<void> hide() async {
@@ -61,6 +68,7 @@ class OverlayService {
         'icon': sp.getString(kIcon) ?? defaultIcon,
         'color': sp.getString(kColor) ?? defaultColor,
         'title': sp.getString(kTitle) ?? defaultTitle,
+        'image': sp.getString(kImage) ?? '',
       });
       await FlutterOverlayWindow.shareData(data);
     } catch (_) {}
@@ -72,15 +80,20 @@ class OverlayService {
       'icon': sp.getString(kIcon) ?? defaultIcon,
       'color': sp.getString(kColor) ?? defaultColor,
       'title': sp.getString(kTitle) ?? defaultTitle,
+      'image': sp.getString(kImage) ?? '',
     };
   }
 
   static Future<void> saveConfig(
-      {required String icon, required String color, required String title}) async {
+      {required String icon,
+      required String color,
+      required String title,
+      String image = ''}) async {
     final sp = await SharedPreferences.getInstance();
     await sp.setString(kIcon, icon);
     await sp.setString(kColor, color);
     await sp.setString(kTitle, title);
+    await sp.setString(kImage, image);
     await pushConfig();
   }
 }

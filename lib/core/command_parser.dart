@@ -60,7 +60,7 @@ const Map<String, String> appMap = {
   'playstore': 'com.android.vending',
 };
 
-ParsedCommand parseLocalCommand(String rawText) {
+ParsedCommand parseLocalCommand(String rawText, {String pin = ''}) {
   final t = rawText.toLowerCase().trim();
 
   // --- BUKA APLIKASI: "buka whatsapp", "open youtube", "tolong bukain ig" ---
@@ -109,17 +109,48 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- NYALAKAN LAYAR (layar-mati, bukan mati total).
-  // Tanpa Shizuku: hanya menyalakan layar via WakeLock.
-  // Kalau ada PIN/fingerprint, buka manual ya Sir (blokir keamanan Android).
+  // Via Shizuku bila tersambung (bisa swipe + coba PIN),
+  // else fallback WakeLock biasa (hanya nyalakan layar).
   if (t.contains('nyalakan layar') ||
       t.contains('nyalakan hp') ||
       t.contains('hidupkan layar') ||
       t.contains('bangun') ||
       t.contains('wake up')) {
+    final p = pin;
     return ParsedCommand(
       handledLocally: true,
       reply: 'Menyalakan layar, Sir.',
-      action: () => AppController.wakeUp(),
+      action: () async {
+        final s = await AppController.shizukuCheck();
+        if (s == 'OK') return AppController.shizukuWakeUnlock(p);
+        return AppController.wakeUp();
+      },
+    );
+  }
+
+  // --- SHIZUKU: tap tombol kirim (misal tombol Kirim WA kanan bawah) ---
+  if (t.contains('tap kirim') ||
+      t.contains('tekan kirim') ||
+      t.contains('klik kirim')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Men-tap tombol kirim via Shizuku, Sir.',
+      action: () => AppController.shizukuTap(935, 950),
+    );
+  }
+
+  // --- SHIZUKU: ketik teks otomatis: "ketik halo bro" ---
+  if (t.startsWith('ketik ') || t.startsWith('ketikkan ')) {
+    final txt =
+        rawText.replaceFirst(RegExp(r'(?i)^(ketik|ketikkan)\s+'), '').trim();
+    if (txt.isEmpty) {
+      return ParsedCommand(
+          handledLocally: true, reply: 'Mau ketik apa, Sir?');
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengetik via Shizuku, Sir.',
+      action: () => AppController.shizukuType(txt),
     );
   }
 
