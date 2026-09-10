@@ -37,6 +37,16 @@ class AppController {
   static Future<String> requestMic() => _invoke('requestMic');
   static Future<String> pickImage() => _invoke('pickImage');
 
+  // --- Popup robot native ---
+  static Future<String> overlayShow() => _invoke('overlayShow');
+  static Future<String> overlayHide() => _invoke('overlayHide');
+  static Future<String> overlayActive() => _invoke('overlayActive');
+  static Future<String> overlayPerm() => _invoke('overlayPerm');
+
+  // --- Handsfree wake lock ---
+  static Future<String> handsfreeWake(bool on) =>
+      _invoke('handsfreeWake', {'on': on});
+
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
   static Future<String> accOpenSettings() => _invoke('accOpenSettings');

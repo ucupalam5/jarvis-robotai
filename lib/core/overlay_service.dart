@@ -1,59 +1,39 @@
-import 'dart:convert';
-
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../overlay/overlay_widget.dart';
+import 'app_controller.dart';
 
-/// Popup RobotAI melayang (SYSTEM_ALERT_WINDOW).
-/// Ikon/warna/teks bisa diganti dari Settings di aplikasi utama,
-/// overlay ikut update live via shareData (tanpa restart popup).
+/// Pilihan ikon popup robot (harus sama dengan drawable native:
+/// ic_ov_<key>.xml di android/.../res/drawable).
+const Map<String, IconData> popupIcons = {
+  'robot': Icons.smart_toy,
+  'bolt': Icons.bolt,
+  'eye': Icons.visibility,
+  'chip': Icons.memory,
+};
+
+/// Popup RobotAI melayang — dirender NATIVE (JarvisOverlayService),
+/// tanpa plugin overlay. Ikon/warna/teks/gambar dibaca service dari
+/// SharedPreferences setiap show(), jadi save = tampil ulang = tampilan baru.
 class OverlayService {
   static const String kIcon = 'popup_icon';
   static const String kColor = 'popup_color';
   static const String kTitle = 'popup_title';
-  static const String kImage = 'popup_image'; // path file galeri, '' = pakai ikon
+  static const String kImage = 'popup_image'; // path file galeri, '' = ikon
 
   static const String defaultIcon = 'robot';
   static const String defaultColor = '00D4FF';
   static const String defaultTitle = 'JARVIS standby...';
 
-  static Future<bool> ensurePermission() async {
-    final granted = await FlutterOverlayWindow.isPermissionGranted();
-    if (!granted) {
-      await FlutterOverlayWindow.requestPermission();
-      return await FlutterOverlayWindow.isPermissionGranted();
-    }
-    return true;
+  /// true bila popup benar-benar tampil (dicek ulang setelah jeda).
+  static Future<bool> show() async {
+    final r = await AppController.overlayShow();
+    if (r != 'OK') return false;
+    await Future.delayed(const Duration(milliseconds: 1800));
+    return await AppController.overlayActive() == 'YA';
   }
 
-  /// true bila popup benar-benar tampil. false = izin overlay belum diberi.
-  /// Catatan: isActive dicek ULANG setelah jeda karena overlay butuh
-  /// ~1 detik untuk naik (cek langsung selalu false = laporan bohong).
-  static Future<bool> show() async {
-    if (!await ensurePermission()) return false;
-    try {
-      if (await FlutterOverlayWindow.isActive()) {
-        await pushConfig();
-        return true;
-      }
-      await FlutterOverlayWindow.showOverlay(
-        enableDrag: true,
-        overlayTitle: 'JARVIS standby',
-        overlayContent: 'Tap untuk perintah suara',
-        flag: OverlayFlag.defaultFlag,
-        visibility: NotificationVisibility.visibilityPublic,
-        positionGravity: PositionGravity.right,
-        height: 220,
-        width: 200,
-        startPosition: const OverlayPosition(0, -200),
-      );
-    } catch (_) {
-      return false;
-    }
-    await Future.delayed(const Duration(milliseconds: 1800));
-    final ok = await FlutterOverlayWindow.isActive();
-    if (ok) pushConfig();
-    return ok;
+  static Future<void> hide() async {
+    await AppController.overlayHide();
   }
 
   /// Status jujur untuk ditampilkan di dialog setting.
@@ -61,31 +41,20 @@ class OverlayService {
     bool active = false;
     bool perm = false;
     try {
-      active = await FlutterOverlayWindow.isActive();
+      active = await AppController.overlayActive() == 'YA';
     } catch (_) {}
     try {
-      perm = await FlutterOverlayWindow.isPermissionGranted();
+      perm = await AppController.overlayPerm() == 'YA';
     } catch (_) {}
     return {'active': active, 'permission': perm};
   }
 
-  static Future<void> hide() async {
-    if (await FlutterOverlayWindow.isActive()) {
-      await FlutterOverlayWindow.closeOverlay();
-    }
-  }
-
-  /// Baca config tersimpan lalu kirim ke overlay sebagai JSON string.
+  /// Simpan config + tampilkan ulang bila popup sedang aktif.
   static Future<void> pushConfig() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      final data = jsonEncode({
-        'icon': sp.getString(kIcon) ?? defaultIcon,
-        'color': sp.getString(kColor) ?? defaultColor,
-        'title': sp.getString(kTitle) ?? defaultTitle,
-        'image': sp.getString(kImage) ?? '',
-      });
-      await FlutterOverlayWindow.shareData(data);
+      if (await AppController.overlayActive() == 'YA') {
+        await AppController.overlayShow();
+      }
     } catch (_) {}
   }
 
@@ -112,6 +81,3 @@ class OverlayService {
     await pushConfig();
   }
 }
-
-// Supaya file overlay_widget terdaftar saat compile overlay entry-point.
-void _keepOverlayImportAlive() => overlayMain();

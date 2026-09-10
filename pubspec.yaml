@@ -15,8 +15,6 @@ dependencies:
   flutter_tts: 4.0.2
   http: ^1.2.0
   shared_preferences: ^2.2.2
-  # Popup robot melayang. Dikunci 0.4.5 (stabil dengan Flutter 3.24 + Kotlin 1.9).
-  flutter_overlay_window: 0.4.5
 
 dev_dependencies:
   flutter_test:

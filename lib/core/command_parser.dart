@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'app_controller.dart';
 
 /// Hasil parsing perintah suara -> aksi lokal atau lempar ke AI.
@@ -341,6 +343,55 @@ ParsedCommand parseLocalCommand(String rawText) {
         action: () => AppController.setVolumeDown(),
       );
     }
+  }
+
+  // --- CATATAN SUARA: "catat beli susu" / "baca catatan" / "hapus catatan" ---
+  if (t.startsWith('catat ')) {
+    final body =
+        rawText.replaceFirst(RegExp(r'(?i)^catat\s+'), '').trim();
+    if (body.isEmpty) {
+      return ParsedCommand(
+          handledLocally: true, reply: 'Mau catat apa, Sir?');
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencatat, Sir.',
+      action: () async {
+        final sp = await SharedPreferences.getInstance();
+        final list = sp.getStringList('jarvis_notes') ?? [];
+        list.add(body);
+        await sp.setStringList('jarvis_notes', list);
+        return 'SAY:Dicatat, Sir: $body. Total ${list.length} catatan.';
+      },
+    );
+  }
+  if (t.contains('baca catatan') || t.contains('lihat catatan')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membaca catatan, Sir.',
+      action: () async {
+        final sp = await SharedPreferences.getInstance();
+        final list = sp.getStringList('jarvis_notes') ?? [];
+        if (list.isEmpty) return 'SAY:Belum ada catatan, Sir.';
+        final isi = list
+            .asMap()
+            .entries
+            .map((e) => '${e.key + 1}. ${e.value}')
+            .join('. ');
+        return 'SAY:Catatan Sir: $isi.';
+      },
+    );
+  }
+  if (t.contains('hapus catatan') || t.contains('hapus semua catatan')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menghapus catatan, Sir.',
+      action: () async {
+        final sp = await SharedPreferences.getInstance();
+        await sp.remove('jarvis_notes');
+        return 'SAY:Semua catatan dihapus, Sir.';
+      },
+    );
   }
 
   // --- Bukan perintah lokal -> lempar ke Groq AI ---

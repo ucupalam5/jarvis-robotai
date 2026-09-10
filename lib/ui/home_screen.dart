@@ -5,7 +5,6 @@ import '../core/command_parser.dart';
 import '../core/groq_service.dart';
 import '../core/overlay_service.dart';
 import '../core/voice_service.dart';
-import '../overlay/overlay_widget.dart' show popupIcons;
 import 'jarvis_orb.dart';
 
 class ChatMsg {
@@ -38,7 +37,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final _popTitleCtrl = TextEditingController();
   String _popImage = '';
   double _level = 0;
-  bool _savingPop = false;
+  bool _handsfree = false;
+  String _keyCheck = ''; // '' | 'ok' | 'bad:pesan'
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -66,6 +66,27 @@ class _HomeScreenState extends State<HomeScreen> {
     _popImage = pop['image'] ?? '';
     setState(() {});
     _refreshAcc(silent: true);
+    _checkKey(silent: true);
+  }
+
+  /// Validasi API key ke server Groq. Hasil tampil sebagai banner.
+  Future<void> _checkKey({bool silent = false}) async {
+    final k = widget.groq.apiKey;
+    if (k.isEmpty) {
+      if (mounted) setState(() => _keyCheck = '');
+      return;
+    }
+    if (mounted) setState(() => _keyCheck = 'cek');
+    try {
+      final (ok, msg) = await widget.groq.validateKey(k);
+      if (mounted) setState(() => _keyCheck = ok ? 'ok' : 'bad:$msg');
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _keyCheck = 'bad:Tidak bisa hubungi Groq: $e');
+    }
   }
 
   Future<void> _refreshAcc({bool silent = false}) async {
@@ -86,12 +107,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('groq_key', _apiCtrl.text.trim());
     widget.groq.apiKey = _apiCtrl.text.trim();
-    if (mounted) {
-      setState(() {}); // refresh banner API key
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API key tersimpan, Sir.')),
-      );
-    }
+    if (mounted) setState(() {}); // refresh banner API key
+    await _checkKey();
   }
 
   void _scrollDown() {
@@ -119,7 +136,9 @@ class _HomeScreenState extends State<HomeScreen> {
       reply = cmd.reply;
       if (cmd.action != null) {
         final res = await cmd.action!();
-        if (res.startsWith('BATERAI_REPLY:')) {
+        if (res.startsWith('SAY:')) {
+          reply = res.substring('SAY:'.length);
+        } else if (res.startsWith('BATERAI_REPLY:')) {
           reply = res.substring('BATERAI_REPLY:'.length);
         } else if (res != 'OK') {
           reply = '$reply (catatan: $res)';
@@ -143,9 +162,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _tapOrb() async {
+    // Saat handsfree ON, tap orb = matikan handsfree.
+    if (_handsfree) {
+      await _setHandsfree(false);
+      return;
+    }
     if (_listening) {
       await widget.voice.stopListen();
-      setState(() => _listening = false);
+      if (mounted) {
+        setState(() {
+          _listening = false;
+          _level = 0;
+        });
+      }
       return;
     }
     await widget.voice.stopSpeak();
@@ -162,6 +191,63 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    await _listenCycle();
+  }
+
+  /// Nyalakan/matikan mode handsfree: dengar terus tanpa tap orb.
+  /// Layar ditahan redup (wake lock) agar mic tetap hidup.
+  /// Batas jujur: HP harus NYALA (standby). Mati total tidak bisa dengar.
+  Future<void> _setHandsfree(bool on) async {
+    if (on) {
+      await widget.voice.stopSpeak();
+      final mic = await AppController.requestMic();
+      if (mic != 'OK') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(mic.startsWith('DENIED:')
+                ? mic.substring('DENIED:'.length)
+                : mic),
+          ));
+        }
+        return;
+      }
+      if (mounted) setState(() => _handsfree = true);
+      await AppController.handsfreeWake(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            duration: Duration(seconds: 4),
+            content: Text(
+                'Handsfree ON, Sir. Bicara saja tanpa tap. Tap orb untuk berhenti.')));
+      }
+      _handsfreeLoop();
+    } else {
+      if (mounted) setState(() => _handsfree = false);
+      try {
+        await widget.voice.stopListen();
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _listening = false;
+          _level = 0;
+        });
+      }
+      await AppController.handsfreeWake(false);
+    }
+  }
+
+  Future<void> _handsfreeLoop() async {
+    while (_handsfree && mounted) {
+      if (!_busy && !_listening) {
+        try {
+          await _listenCycle();
+        } catch (_) {}
+      }
+      await Future.delayed(const Duration(milliseconds: 800));
+    }
+  }
+
+  /// Satu putaran dengar-proses. Dipakai tap orb maupun handsfree loop.
+  Future<void> _listenCycle() async {
     setState(() {
       _listening = true;
       _draft = 'Mendengarkan...';
@@ -179,7 +265,8 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         if (txt.trim().isNotEmpty) {
           await _handleText(txt);
-        } else if (DateTime.now().difference(start).inMilliseconds > 1500) {
+        } else if (!_handsfree &&
+            DateTime.now().difference(start).inMilliseconds > 1500) {
           // Bukan tap-batal (user bicara tapi tak tertangkap): beri penuntun.
           final mic = await widget.voice.hasMicPermission;
           if (mounted) {
@@ -198,8 +285,8 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _level = v);
       }
     });
-    // timeout pengaman 16 detik
-    Future.delayed(const Duration(seconds: 16), () async {
+    // timeout pengaman 22 detik (listenFor 20 dtk + toleransi)
+    Future.delayed(const Duration(seconds: 22), () async {
       if (_listening && mounted) {
         await widget.voice.stopListen();
         setState(() => _listening = false);
@@ -244,7 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Banner penuntun API key: muncul sampai user pasang key.
+          // Banner penuntun API key + tanda valid/tidaknya key.
           if (widget.groq.apiKey.isEmpty)
             GestureDetector(
               onTap: _openSettings,
@@ -262,6 +349,45 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
                 ),
               ),
+            )
+          else if (_keyCheck.startsWith('bad:'))
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.redAccent),
+              ),
+              child: Text(
+                '✗ API key BERMASALAH, Sir.\n${_keyCheck.substring(4)}\nTap Settings untuk ganti.',
+                style:
+                    const TextStyle(color: Colors.redAccent, fontSize: 13),
+              ),
+            )
+          else if (_keyCheck == 'ok')
+            Container(
+              width: double.infinity,
+              margin:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.greenAccent),
+              ),
+              child: const Text(
+                '✓ API key Groq VALID, Sir.',
+                style: TextStyle(color: Colors.greenAccent, fontSize: 12),
+              ),
+            )
+          else if (_keyCheck == 'cek')
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text('Mengecek API key ke Groq...',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
             ),
           const SizedBox(height: 8),
           GestureDetector(
@@ -276,7 +402,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? (_draft.isEmpty
                         ? 'Mendengarkan... bicara BAHASA INDONESIA, Sir.'
                         : '“$_draft”')
-                    : 'TAP ORB UNTUK BICARA (Indonesia)',
+                    : (_handsfree
+                        ? 'HANDSFREE ON — bicara saja, Sir.'
+                        : 'TAP ORB BICARA / HANDSFREE MODE'),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
           ),
@@ -338,6 +466,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 _quick('Nyalakan layar', () => _handleText('nyalakan layar')),
                 _quick('Senter ON', () => _handleText('nyalakan senter')),
                 _quick('Baterai', () => _handleText('baterai berapa')),
+                _quick(_handsfree ? 'Handsfree ON' : 'Handsfree',
+                    () => _setHandsfree(!_handsfree)),
               ],
             ),
           ),
@@ -393,6 +523,7 @@ class _HomeScreenState extends State<HomeScreen> {
     String selIcon = _popIcon;
     String selColor = _popColor;
     String selImage = _popImage;
+    bool saving = false;
     final titleCtrl = TextEditingController(text: _popTitleCtrl.text);
     Color hex(String h) {
       try {
@@ -555,12 +686,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: const Text('Batal')),
             ElevatedButton(
                 onPressed: () async {
-                  final title = titleCtrl.text.trim().isEmpty
-                      ? OverlayService.defaultTitle
-                      : titleCtrl.text.trim();
-                  // Kunci tombol selama simpan biar tidak double-tap.
-                  setD(() => _savingPop = true);
+                  // Seluruh alur dalam try: tombol tidak boleh terasa mati.
                   try {
+                    if (saving) return;
+                    saving = true;
+                    try {
+                      setD(() {});
+                    } catch (_) {}
+                    final title = titleCtrl.text.trim().isEmpty
+                        ? OverlayService.defaultTitle
+                        : titleCtrl.text.trim();
                     await OverlayService.saveConfig(
                         icon: selIcon,
                         color: selColor,
@@ -586,17 +721,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                     if (ctx.mounted) Navigator.pop(ctx);
                   } catch (e) {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                          SnackBar(content: Text('Gagal simpan: $e')));
-                    }
-                  } finally {
                     try {
-                      setD(() => _savingPop = false);
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Gagal simpan: $e')));
+                      }
                     } catch (_) {}
                   }
                 },
-                child: Text(_savingPop ? 'Menyimpan...' : 'Save')),
+                child: Text(saving ? 'Menyimpan...' : 'Save')),
           ],
         ),
       ),

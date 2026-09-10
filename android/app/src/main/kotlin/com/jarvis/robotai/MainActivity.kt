@@ -13,6 +13,7 @@ import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.AlarmClock
@@ -30,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private val PICK_REQ = 2002
     private var micResult: MethodChannel.Result? = null
     private var pickResult: MethodChannel.Result? = null
+    private var hfWl: PowerManager.WakeLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -76,6 +78,27 @@ class MainActivity : FlutterActivity() {
                     }
                     "requestMic" -> requestMic(result)
                     "pickImage" -> pickImage(result)
+                    // --- Popup robot native ---
+                    "overlayShow" -> result.success(overlayShow())
+                    "overlayHide" -> {
+                        try {
+                            stopService(Intent(this, JarvisOverlayService::class.java))
+                        } catch (_: Exception) {}
+                        result.success("OK")
+                    }
+                    "overlayActive" -> result.success(
+                        if (JarvisOverlayService.running) "YA" else "TIDAK"
+                    )
+                    "overlayPerm" -> result.success(
+                        if (Build.VERSION.SDK_INT < 23 ||
+                            Settings.canDrawOverlays(this)
+                        ) "YA" else "TIDAK"
+                    )
+                    // --- Handsfree: tahan CPU redup agar mic tetap dengar ---
+                    "handsfreeWake" -> {
+                        val on = call.argument<Boolean>("on") ?: false
+                        result.success(handsfreeWake(on))
+                    }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
                     "accOpenSettings" -> {
@@ -320,6 +343,43 @@ class MainActivity : FlutterActivity() {
     private fun accStatus(): String {
         return if (JarvisAccessibilityService.isEnabled()) "OK"
         else "BELUM: aktifkan di Settings HP > Accessibility > Jarvis > ON."
+    }
+
+    private fun overlayShow(): String {
+        if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            return "NO_PERM:Buka Settings HP > Apps > JARVIS > Display over other apps > Allow ya Sir."
+        }
+        return try {
+            ContextCompat.startForegroundService(
+                this, Intent(this, JarvisOverlayService::class.java)
+            )
+            "OK"
+        } catch (e: Exception) {
+            "Gagal tampilkan popup: ${e.message}"
+        }
+    }
+
+    private fun handsfreeWake(on: Boolean): String {
+        return try {
+            if (on) {
+                if (hfWl == null) {
+                    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                    @Suppress("DEPRECATION")
+                    hfWl = pm.newWakeLock(
+                        PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
+                        "jarvis:handsfree"
+                    ).apply { setReferenceCounted(false) }
+                }
+                if (hfWl?.isHeld != true) hfWl?.acquire()
+            } else {
+                try {
+                    if (hfWl?.isHeld == true) hfWl?.release()
+                } catch (_: Exception) {}
+            }
+            "OK"
+        } catch (e: Exception) {
+            "Gagal wake lock: ${e.message}"
+        }
     }
 
     /** Minta izin microphone saat user tap orb (tanpa plugin tambahan). */

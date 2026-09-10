@@ -77,5 +77,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Popup robot Jarvis (foreground service + overlay window).
+             specialUse dipakai khusus Android 14+ via kode (runtime),
+             jadi tanpa foregroundServiceType di manifest agar lolos install
+             di HP lama. Property subtype wajib untuk specialUse di API 34. -->
+        <service
+            android:name=".JarvisOverlayService"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Popup asisten Jarvis melayang di atas aplikasi lain." />
+        </service>
     </application>
 </manifest>

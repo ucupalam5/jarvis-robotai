@@ -18,6 +18,29 @@ Kalau user minta buka/tutup aplikasi, jawab konfirmasi singkat seperti "Siap Sir
 Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
 ''';
 
+  /// Cek key ke server Groq. Return (valid, pesan).
+  Future<(bool, String)> validateKey(String key) async {
+    if (key.isEmpty) return (false, 'Key kosong.');
+    try {
+      final res = await http.get(
+        Uri.parse('https://api.groq.com/openai/v1/models'),
+        headers: {'Authorization': 'Bearer $key'},
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        return (true, 'API key VALID ✓ Sir. Groq tersambung.');
+      }
+      if (res.statusCode == 401) {
+        return (
+          false,
+          'API key SALAH/expired (401). Buat baru di console.groq.com > API Keys.'
+        );
+      }
+      return (false, 'Groq jawab ${res.statusCode}. Cek koneksi/kuota ya Sir.');
+    } catch (e) {
+      return (false, 'Tidak bisa hubungi Groq: $e');
+    }
+  }
+
   Future<String> chat(String userText, List<Map<String, String>> history) async {
     if (apiKey.isEmpty) {
       return 'Sir, Groq API key belum dipasang. Masukkan di Settings ya Sir.';
