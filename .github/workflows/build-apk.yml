@@ -30,6 +30,9 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Dikunci 3.24.5 agar cocok dengan AGP 8.1.0 + Kotlin 1.9.10.
+          # Stable terbaru (3.4x) gagal compile FlutterPlugin.kt di runner.
+          flutter-version: '3.24.5'
           cache: true
 
       - name: Flutter doctor
