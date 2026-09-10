@@ -27,14 +27,15 @@ class OverlayService {
   }
 
   /// true bila popup benar-benar tampil. false = izin overlay belum diberi.
+  /// Catatan: isActive dicek ULANG setelah jeda karena overlay butuh
+  /// ~1 detik untuk naik (cek langsung selalu false = laporan bohong).
   static Future<bool> show() async {
     if (!await ensurePermission()) return false;
-    if (await FlutterOverlayWindow.isActive()) {
-      // Sudah aktif: kirim config terbaru saja biar tampilannya refresh.
-      await pushConfig();
-      return true;
-    }
     try {
+      if (await FlutterOverlayWindow.isActive()) {
+        await pushConfig();
+        return true;
+      }
       await FlutterOverlayWindow.showOverlay(
         enableDrag: true,
         overlayTitle: 'JARVIS standby',
@@ -49,9 +50,23 @@ class OverlayService {
     } catch (_) {
       return false;
     }
-    // Kirim tampilan tersimpan begitu overlay siap.
-    Future.delayed(const Duration(seconds: 1), pushConfig);
-    return await FlutterOverlayWindow.isActive();
+    await Future.delayed(const Duration(milliseconds: 1800));
+    final ok = await FlutterOverlayWindow.isActive();
+    if (ok) pushConfig();
+    return ok;
+  }
+
+  /// Status jujur untuk ditampilkan di dialog setting.
+  static Future<Map<String, bool>> overlayStatus() async {
+    bool active = false;
+    bool perm = false;
+    try {
+      active = await FlutterOverlayWindow.isActive();
+    } catch (_) {}
+    try {
+      perm = await FlutterOverlayWindow.isPermissionGranted();
+    } catch (_) {}
+    return {'active': active, 'permission': perm};
   }
 
   static Future<void> hide() async {

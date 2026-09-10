@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _popTitleCtrl = TextEditingController();
   String _popImage = '';
   double _level = 0;
+  bool _savingPop = false;
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -272,8 +273,11 @@ class _HomeScreenState extends State<HomeScreen> {
             _busy
                 ? 'Processing...'
                 : _listening
-                    ? (_draft.isEmpty ? 'Mendengarkan...' : '“$_draft”')
-                    : 'TAP ORB UNTUK BICARA',
+                    ? (_draft.isEmpty
+                        ? 'Mendengarkan... bicara BAHASA INDONESIA, Sir.'
+                        : '“$_draft”')
+                    : 'TAP ORB UNTUK BICARA (Indonesia)',
+            textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
           ),
           // Meter level mic: membuktikan mic hidup saat mendengarkan.
@@ -410,6 +414,28 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Status real overlay: bukti popup hidup/mati + izin.
+                FutureBuilder<Map<String, bool>>(
+                  future: OverlayService.overlayStatus(),
+                  builder: (c, snap) {
+                    final st = snap.data;
+                    final txt = st == null
+                        ? 'Status popup: mengecek...'
+                        : 'Status popup: ${st['active'] == true ? 'AKTIF ✓' : 'MATI ✗'} • Izin overlay: ${st['permission'] == true ? 'YA ✓' : 'BELUM ✗'}';
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white10,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(txt,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12)),
+                    );
+                  },
+                ),
                 const Text('Pilih ikon:',
                     style: TextStyle(color: Colors.white70, fontSize: 13)),
                 const SizedBox(height: 8),
@@ -532,12 +558,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   final title = titleCtrl.text.trim().isEmpty
                       ? OverlayService.defaultTitle
                       : titleCtrl.text.trim();
+                  // Kunci tombol selama simpan biar tidak double-tap.
+                  setD(() => _savingPop = true);
                   try {
                     await OverlayService.saveConfig(
                         icon: selIcon,
                         color: selColor,
                         title: title,
                         image: selImage);
+                    // Verifikasi baca-balik: bukti nyata tersimpan.
+                    final check = await OverlayService.readConfig();
+                    final ok = check['icon'] == selIcon &&
+                        check['color'] == selColor &&
+                        check['title'] == title &&
+                        check['image'] == selImage;
                     if (mounted) {
                       setState(() {
                         _popIcon = selIcon;
@@ -545,10 +579,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         _popTitleCtrl.text = title;
                         _popImage = selImage;
                       });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content:
-                                  Text('Ikon popup tersimpan, Sir.')));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(ok
+                              ? 'Tersimpan ✓ ikon=$selIcon warna=$selColor, Sir.'
+                              : 'Tersimpan tapi verifikasi beda, Sir. Coba lagi.')));
                     }
                     if (ctx.mounted) Navigator.pop(ctx);
                   } catch (e) {
@@ -556,9 +590,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                           SnackBar(content: Text('Gagal simpan: $e')));
                     }
+                  } finally {
+                    try {
+                      setD(() => _savingPop = false);
+                    } catch (_) {}
                   }
                 },
-                child: const Text('Save')),
+                child: Text(_savingPop ? 'Menyimpan...' : 'Save')),
           ],
         ),
       ),

@@ -13,12 +13,23 @@ class VoiceService {
 
   Future<void> initTts() async {
     try {
-      // Coba Indonesia dulu, gagal -> pakai bahasa default HP.
+      // Paksa suara Indonesia: cari voice 'id' yang terinstall lalu kunci.
       try {
         await tts.setLanguage('id-ID').timeout(const Duration(seconds: 5));
-      } catch (_) {
-        await tts.setLanguage('en-US').timeout(const Duration(seconds: 5));
-      }
+        final voices = await tts.getVoices.timeout(const Duration(seconds: 5));
+        if (voices is List) {
+          for (final v in voices) {
+            if (v is Map) {
+              final loc = (v['locale'] ?? '').toString().toLowerCase();
+              if (loc.startsWith('id')) {
+                await tts.setVoice(
+                    {'name': v['name'], 'locale': v['locale']});
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
       await tts.setSpeechRate(0.95);
       await tts.setPitch(0.9); // suara agak berat ala Jarvis
       await tts.setVolume(1.0);
@@ -48,8 +59,9 @@ class VoiceService {
     }
   }
 
-  /// Pilih locale terbaik: Indonesia bila ada, else locale sistem, else default.
-  Future<String?> _pickLocale() async {
+  /// SELALU Indonesia: pakai locale id bila ada, else paksa 'id-ID'
+  /// (recognizer online Google tetap paham). Jangan pernah fallback Inggris.
+  Future<String> _pickLocale() async {
     try {
       final locales =
           await stt.locales().timeout(const Duration(seconds: 5));
@@ -57,13 +69,8 @@ class VoiceService {
         final id = l.localeId.toLowerCase().replaceAll('_', '-');
         if (id.startsWith('id')) return l.localeId;
       }
-      try {
-        final sys = await stt.systemLocale()
-            .timeout(const Duration(seconds: 5));
-        if (sys != null) return sys.localeId;
-      } catch (_) {}
     } catch (_) {}
-    return null; // null = pakai default HP
+    return 'id-ID';
   }
 
   Future<void> speak(String text) async {
@@ -105,8 +112,8 @@ class VoiceService {
       await stt.listen(
         onResult: (r) => onResult(r.recognizedWords, r.finalResult),
         localeId: locale,
-        listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 20),
+        pauseFor: const Duration(seconds: 4),
         partialResults: true,
         onSoundLevelChange: onLevel == null
             ? null
