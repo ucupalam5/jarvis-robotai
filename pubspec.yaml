@@ -1,0 +1,30 @@
+name: jarvis_robotai
+description: Asisten RobotAI pribadi ala Jarvis - voice control Android + Groq AI + popup overlay.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  speech_to_text: ^6.6.0
+  flutter_tts: ^4.0.2
+  http: ^1.2.0
+  flutter_overlay_window: ^0.4.5
+  permission_handler: ^11.3.0
+  shared_preferences: ^2.2.2
+  flutter_dotenv: ^5.1.0
+  avatar_glow: ^3.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env

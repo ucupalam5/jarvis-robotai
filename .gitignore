@@ -1,0 +1,26 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+
+# Android
+local.properties
+*.keystore
+*.jks
+android/.gradle/
+android/captures/
+android/local.properties
+
+# Env berisi API key - JANGAN push key asli
+.env
+
+# Termux / OS
+__pycache__/
+*.pyc

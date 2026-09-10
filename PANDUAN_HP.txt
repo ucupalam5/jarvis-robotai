@@ -1,0 +1,34 @@
+JARVIS - CARA PUSH DARI HP (3 MENIT, TANPA PC)
+================================================
+
+PILIH SALAH SATU:
+
+A. VIA TERMUX (paling gampang, otomatis):
+1. Copy SEMUA file folder jarvis_robotai ke HP (atau download zip saya).
+2. Di Termux:
+   cd ~/jarvis_robotai
+   bash push_to_github.sh
+3. Ikuti login GitHub via browser sekali saja.
+4. Selesai. Buka github.com > repo kamu > Actions > download APK.
+
+B. VIA APLIKASI SPCK EDITOR (tanpa ketik perintah):
+1. Install Spck Editor dari Play Store.
+2. Open folder jarvis_robotai.
+3. Menu Git > Clone/Push > login GitHub > push ke repo jarvis-robotai.
+4. Buka github.com di Chrome > Actions > download APK.
+
+C. VIA BROWSER SAJA (tanpa aplikasi tambahan):
+1. Di github.com buat repo baru jarvis-robotai.
+2. Tap Add file > Upload files.
+3. Upload file PENTING ini satu-satu (struktur harus pas):
+   pubspec.yaml
+   lib/... (semua file)
+   android/... (semua file)
+   .github/workflows/build-apk.yml  <- PENTING, awali titik!
+   .gitignore
+   Cara zip: HP kadang sembunyikan file titik. Pakai cara A/B bila gagal.
+
+SETELAH PUSH:
+- Tab Actions > klik run hijau > Artifacts > jarvis-app-release.zip
+- Ekstrak > install app-release.apk > izinkan Unknown apps
+- Buka Jarvis > isi Groq key > aktifkan Shizuku (lihat BUILD_VIA_GITHUB.md)

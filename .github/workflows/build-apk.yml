@@ -1,0 +1,56 @@
+name: Build Jarvis APK
+
+# Build APK Flutter TANPA PC — cukup dari HP via browser GitHub.
+# Cara pakai: push repo ini ke GitHub -> tab Actions -> workflow ini jalan otomatis
+# -> download app-release.apk dari Artifacts.
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          # samakan dengan sdk di pubspec (>=3.2.0). Pakai versi stabil terbaru.
+          flutter-version: '3.24.0'
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze (tidak menggagalkan build bila warning)
+        run: flutter analyze || true
+
+      - name: Build APK release
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
