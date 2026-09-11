@@ -579,25 +579,6 @@ double _eval(String e) {
       .map((m) => m.group(0)!)
       .toList();
   int pos = 0;
-  double expr() {
-    var v = term();
-    while (pos < toks.length && (toks[pos] == '+' || toks[pos] == '-')) {
-      final op = toks[pos++];
-      final r = term();
-      v = op == '+' ? v + r : v - r;
-    }
-    return v;
-  }
-
-  double term() {
-    var v = factor();
-    while (pos < toks.length && (toks[pos] == '*' || toks[pos] == '/')) {
-      final op = toks[pos++];
-      final r = factor();
-      v = op == '*' ? v * r : v / r;
-    }
-    return v;
-  }
 
   double factor() {
     if (pos < toks.length && toks[pos] == '-') {
@@ -611,6 +592,26 @@ double _eval(String e) {
       return v;
     }
     return double.parse(toks[pos++]);
+  }
+
+  double term() {
+    var v = factor();
+    while (pos < toks.length && (toks[pos] == '*' || toks[pos] == '/')) {
+      final op = toks[pos++];
+      final r = factor();
+      v = op == '*' ? v * r : v / r;
+    }
+    return v;
+  }
+
+  double expr() {
+    var v = term();
+    while (pos < toks.length && (toks[pos] == '+' || toks[pos] == '-')) {
+      final op = toks[pos++];
+      final r = term();
+      v = op == '+' ? v + r : v - r;
+    }
+    return v;
   }
 
   final v = expr();
