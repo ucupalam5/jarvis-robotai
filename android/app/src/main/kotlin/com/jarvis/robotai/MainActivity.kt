@@ -28,8 +28,6 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.net.wifi.WifiManager
-import android.media.AudioManager
-import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
