@@ -390,7 +390,16 @@ class MainActivity : FlutterActivity() {
                 "apps" -> Settings.ACTION_APPLICATION_SETTINGS
                 else -> Settings.ACTION_SETTINGS
             }
-            val i = Intent(action)
+            val i = if (page == "tts") {
+                // Pengaturan suara Google (install paket suara Indonesia = offline TTS).
+                try {
+                    Intent("com.android.settings.TTS_SETTINGS")
+                } catch (_: Exception) {
+                    Intent(Settings.ACTION_LOCALE_SETTINGS)
+                }
+            } else {
+                Intent(action)
+            }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(i)
             "OK"

@@ -31,6 +31,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -624,6 +625,67 @@ class JarvisOverlayService : Service() {
                     return
                 } catch (_: Exception) {}
             }
+            // MODE DERING HP
+            if (s.contains("mode getar") || s == "getar") {
+                setRinger(AudioManager.RINGER_MODE_VIBRATE, "HP mode getar, Sir.")
+                return
+            }
+            if (s.contains("mode hening") || s == "hening") {
+                setRinger(AudioManager.RINGER_MODE_SILENT, "HP mode hening, Sir.")
+                return
+            }
+            if (s.contains("mode normal") || s.contains("mode dering")) {
+                setRinger(AudioManager.RINGER_MODE_NORMAL, "HP mode normal, Sir.")
+                return
+            }
+            // MUSIK
+            if (s.contains("musik jeda") || s.contains("musik pause") || s.contains("jeda musik")) {
+                mediaPress(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                speak("Musik dijeda, Sir.")
+                return
+            }
+            if (s.contains("musik main") || s.contains("lanjut musik") || s.contains("putar musik")) {
+                mediaPress(KeyEvent.KEYCODE_MEDIA_PLAY)
+                speak("Musik main, Sir.")
+                return
+            }
+            if (s.contains("lagu berikut") || s.contains("lagu selanjut") || s.contains("ganti lagu")) {
+                mediaPress(KeyEvent.KEYCODE_MEDIA_NEXT)
+                speak("Lagu berikutnya, Sir.")
+                return
+            }
+            if (s.contains("lagu sebelum") || s.contains("kembali lagu")) {
+                mediaPress(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                speak("Lagu sebelumnya, Sir.")
+                return
+            }
+            // RUTIN
+            if (s.contains("mode tidur") || s.contains("selamat tidur")) {
+                setRinger(AudioManager.RINGER_MODE_SILENT, null)
+                lockNow()
+                speak("Mode tidur, Sir. Hening dan terkunci.")
+                return
+            }
+            if (s.contains("mode kerja")) {
+                setRinger(AudioManager.RINGER_MODE_NORMAL, null)
+                launchPkg("com.google.android.gm")
+                speak("Mode kerja, Sir.")
+                return
+            }
+            if (s.contains("mode nonton") || s.contains("mode film")) {
+                setRinger(AudioManager.RINGER_MODE_VIBRATE, null)
+                launchPkg("com.google.android.youtube")
+                speak("Mode nonton, Sir.")
+                return
+            }
+            // KALKULATOR (offline)
+            if ((s.startsWith("berapa") || s.startsWith("hitung")) && s.any { it.isDigit() }) {
+                val h = calcId(s)
+                if (h != null) {
+                    speak("Hasilnya $h, Sir.")
+                    return
+                }
+            }
             // Selain itu -> Groq AI
             groqAsk(raw)
         } catch (_: Exception) {
@@ -657,10 +719,117 @@ class JarvisOverlayService : Service() {
         }, 1200)
     }
 
-    private fun camIdList(): Array<String> {        return try {
+    private fun camIdList(): Array<String> {
+        return try {
             (getSystemService(Context.CAMERA_SERVICE) as CameraManager).cameraIdList
         } catch (_: Exception) {
             emptyArray()
+        }
+    }
+
+    private fun setRinger(mode: Int, say: String?) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.ringerMode = mode
+            if (say != null) speak(say)
+        } catch (_: Exception) {
+            speak("Mode suara dikunci DND, Sir.")
+        }
+    }
+
+    private fun mediaPress(code: Int) {
+        try {
+            val down = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(
+                    Intent.EXTRA_KEY_EVENT,
+                    KeyEvent(KeyEvent.ACTION_DOWN, code)
+                )
+            }
+            val up = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(
+                    Intent.EXTRA_KEY_EVENT,
+                    KeyEvent(KeyEvent.ACTION_UP, code)
+                )
+            }
+            sendOrderedBroadcast(down, null)
+            sendOrderedBroadcast(up, null)
+        } catch (_: Exception) {}
+    }
+
+    private fun lockNow() {
+        try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE)
+                as DevicePolicyManager
+            val admin = ComponentName(this, AdminReceiver::class.java)
+            if (dpm.isAdminActive(admin)) dpm.lockNow()
+        } catch (_: Exception) {}
+    }
+
+    private fun launchPkg(pkg: String) {
+        try {
+            packageManager.getLaunchIntentForPackage(pkg)?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(it)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** Kalkulator mini Indonesia. Return hasil format koma / null bila gagal. */
+    private fun calcId(s: String): String? {
+        return try {
+            var e = s.replaceFirst(Regex("^(berapa|hitung)\\s+"), "")
+                .replace("tambah", "+").replace("plus", "+")
+                .replace("kurang", "-").replace("minus", "-")
+                .replace("kali", "*").replace("bagi", "/")
+                .replace("dibagi", "/").replace("persen", "/100")
+                .replace("%", "/100").replace("koma", ".")
+                .replace("x", "*")
+            e = e.filter {
+                it.isDigit() || it == '+' || it == '-' || it == '*' ||
+                    it == '/' || it == '.' || it == '(' || it == ')' ||
+                    it == ' '
+            }.trim()
+            if (!e.any { it.isDigit() }) return null
+            val toks = Regex("\\d+\\.?\\d*|[+\\-*/()]")
+                .findAll(e.replace(" ", "")).map { it.value }.toList()
+            var pos = 0
+            fun expr(): Double {
+                var v = term()
+                while (pos < toks.size && (toks[pos] == "+" || toks[pos] == "-")) {
+                    val op = toks[pos++]
+                    val r = term()
+                    v = if (op == "+") v + r else v - r
+                }
+                return v
+            }
+            fun term(): Double {
+                var v = factor()
+                while (pos < toks.size && (toks[pos] == "*" || toks[pos] == "/")) {
+                    val op = toks[pos++]
+                    val r = factor()
+                    v = if (op == "*") v * r else v / r
+                }
+                return v
+            }
+            fun factor(): Double {
+                if (pos < toks.size && toks[pos] == "-") {
+                    pos++
+                    return -factor()
+                }
+                if (pos < toks.size && toks[pos] == "(") {
+                    pos++
+                    val v = expr()
+                    if (pos < toks.size && toks[pos] == ")") pos++
+                    return v
+                }
+                return toks[pos++].toDouble()
+            }
+            val v = expr()
+            if (pos != toks.size || v.isInfinite() || v.isNaN()) return null
+            if (v == kotlin.math.floor(v)) v.toLong().toString()
+            else "%.2f".format(v).replace(".", ",")
+        } catch (_: Exception) {
+            null
         }
     }
 

@@ -217,6 +217,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _refreshAcc(silent: true);
     _checkKey(silent: true);
     _requestStartupPermissions();
+    _cacheApps();
+    _isOnline();
     // Cek juga saat pertama buka (misal dibuka dari tap popup).
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) _consumeAutolisten();
@@ -274,6 +276,115 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// Jalankan perintah lokal + fallback cerdas bila app tak ketemu.
+  Future<String> _runLocal(String text, ParsedCommand cmd) async {
+    var reply = cmd.reply;
+    if (cmd.action == null) return reply;
+    final res = await cmd.action!();
+    if (res == 'SHOW_APPS:') {
+      if (mounted) _openAppsDialog();
+      return reply;
+    }
+    if (res.startsWith('SAY:')) return res.substring('SAY:'.length);
+    if (res.startsWith('BATERAI_REPLY:')) {
+      return res.substring('BATERAI_REPLY:'.length);
+    }
+    if (res == 'OK') return reply;
+    // AKURASI: kalau app tidak ketemu, cari label terdekat (Levenshtein)
+    // dari daftar app HP lalu buka otomatis.
+    if (res.contains('tidak ketemu') || res.contains('tidak ditemukan')) {
+      final best = await _closestApp(text);
+      if (best != null) {
+        final r2 = await AppController.openApp(best.value);
+        if (r2 == 'OK') {
+          return 'Maksudnya ${best.key} ya Sir. Membuka.';
+        }
+      }
+    }
+    return '$reply (catatan: $res)';
+  }
+
+  /// Cache daftar app sekali saat buka (untuk fallback fuzzy).
+  List<MapEntry<String, String>> _appCache = [];
+
+  Future<void> _cacheApps() async {
+    try {
+      final raw = await AppController.listApps();
+      if (raw.startsWith('ERR:')) return;
+      _appCache = raw
+          .split('\n')
+          .where((l) => l.contains('|'))
+          .map((l) {
+            final i = l.indexOf('|');
+            return MapEntry(l.substring(0, i), l.substring(i + 1));
+          })
+          .toList();
+    } catch (_) {}
+  }
+
+  int _levenshtein(String a, String b) {
+    if (a == b) return 0;
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+    var prev = List<int>.generate(b.length + 1, (i) => i);
+    for (var i = 1; i <= a.length; i++) {
+      var cur = <int>[i];
+      for (var j = 1; j <= b.length; j++) {
+        cur.add([
+          prev[j] + 1,
+          cur[j - 1] + 1,
+          prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)
+        ].reduce((x, y) => x < y ? x : y));
+      }
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  /// Cari label app terdekat dari kata yang diucapkan.
+  Future<MapEntry<String, String>?> _closestApp(String text) async {
+    if (_appCache.isEmpty) await _cacheApps();
+    if (_appCache.isEmpty) return null;
+    final words = text
+        .toLowerCase()
+        .replaceAll(
+            RegExp(r'(buka|bukain|bukakan|open|jalankan|nyalain|idupin|hidupin|tolong|dong|coba)'),
+            ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length > 2)
+        .toList();
+    if (words.isEmpty) return null;
+    MapEntry<String, String>? best;
+    var bestScore = 999;
+    for (final app in _appCache) {
+      final label = app.key.toLowerCase().replaceAll(' ', '');
+      for (final w in words) {
+        final d = _levenshtein(w, label);
+        final limit = label.length <= 4 ? 1 : 2;
+        if ((d <= limit || label.startsWith(w)) && d < bestScore) {
+          bestScore = d;
+          best = app;
+        }
+      }
+    }
+    return best;
+  }
+
+  /// Cek internet cepat TANPA plugin (lookup DNS 4 detik).
+  bool _online = true;
+
+  Future<bool> _isOnline() async {
+    try {
+      final r = await InternetAddress.lookup('8.8.8.8')
+          .timeout(const Duration(seconds: 4));
+      _online = r.isNotEmpty && r.first.rawAddress.isNotEmpty;
+    } catch (_) {
+      _online = false;
+    }
+    if (mounted) setState(() {});
+    return _online;
+  }
+
   Future<void> _handleText(String text) async {
     if (text.trim().isEmpty || _busy) return;
     final tl = text.toLowerCase().trim();
@@ -314,23 +425,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _scrollDown();
 
     // 1) Coba perintah lokal (buka/tutup app, kunci layar, dsb) -> cepat, offline.
-    final sp = await SharedPreferences.getInstance();
     final cmd = parseLocalCommand(text);
     String reply;
     if (cmd.handledLocally) {
-      reply = cmd.reply;
-      if (cmd.action != null) {
-        final res = await cmd.action!();
-        if (res == 'SHOW_APPS:') {
-          if (mounted) _openAppsDialog();
-        } else if (res.startsWith('SAY:')) {
-          reply = res.substring('SAY:'.length);
-        } else if (res.startsWith('BATERAI_REPLY:')) {
-          reply = res.substring('BATERAI_REPLY:'.length);
-        } else if (res != 'OK') {
-          reply = '$reply (catatan: $res)';
-        }
-      }
+      reply = await _runLocal(text, cmd);
+    } else if (!await _isOnline()) {
+      // OFFLINE: jangan buang waktu timeout ke Groq. Perintah lokal tetap jalan.
+      reply =
+          'Sir, lagi offline. Perintah HP (buka app, kunci, senter, hitung, catat) tetap jalan. AI butuh internet ya Sir.';
     } else {
       // 2) Selain itu -> tanya ke Groq AI.
       reply = await widget.groq.chat(text, _history);
@@ -445,7 +547,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _level = 0;
     });
     final start = DateTime.now();
-    await widget.voice.listenOnce(onResult: (txt, finalR) async {
+    await widget.voice.listenOnce(onResult: (txt, finalR, alts) async {
       if (!mounted) return;
       setState(() => _draft = txt.isEmpty ? 'Mendengarkan...' : txt);
       if (finalR) {
@@ -454,7 +556,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _listening = false;
           _level = 0;
         });
-        if (txt.trim().isNotEmpty) {
+        // AKURASI: coba teks utama + semua tebakan STT ke perintah lokal.
+        // Tebakan pertama yang cocok yang dijalankan.
+        final candidates = <String>[txt, ...alts];
+        String? chosen;
+        ParsedCommand? chosenCmd;
+        for (final cand in candidates) {
+          if (cand.trim().isEmpty) continue;
+          final c = parseLocalCommand(cand);
+          if (c.handledLocally) {
+            chosen = cand;
+            chosenCmd = c;
+            break;
+          }
+        }
+        if (chosen != null && chosenCmd != null) {
+          if (chosen != txt && mounted) {
+            setState(() => _draft = chosen!);
+          }
+          await _runLocal(chosen!, chosenCmd);
+        } else if (txt.trim().isNotEmpty) {
           await _handleText(txt);
         } else if (!_handsfree &&
             DateTime.now().difference(start).inMilliseconds > 1500) {
@@ -612,6 +733,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
           const SizedBox(height: 8),
+          // Status koneksi (tap = cek ulang). Offline = perintah lokal saja.
+          GestureDetector(
+            onTap: () => _isOnline(),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _online
+                    ? Colors.green.withOpacity(0.15)
+                    : Colors.red.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: _online ? Colors.greenAccent : Colors.redAccent),
+              ),
+              child: Text(
+                _online
+                    ? '● Online — AI aktif'
+                    : '● OFFLINE — perintah HP tetap jalan, AI mati',
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           // Status otomatisasi (tap = cek ulang, tahan = buka pengaturan).
           GestureDetector(
             onTap: () => _refreshAcc(),

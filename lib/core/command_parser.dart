@@ -312,7 +312,7 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- PENGATURAN CEPAT: "pengaturan wifi" ---
+  // --- PENGATURAN CEPAT: "pengaturan wifi" / "setting suara" ---
   if (t.contains('wifi')) {
     return ParsedCommand(
       handledLocally: true,
@@ -325,6 +325,17 @@ ParsedCommand parseLocalCommand(String rawText) {
       handledLocally: true,
       reply: 'Membuka pengaturan Bluetooth, Sir.',
       action: () => AppController.openSettingsPage('bluetooth'),
+    );
+  }
+  if (t.contains('setting suara') ||
+      t.contains('pengaturan suara') ||
+      t.contains('suara google') ||
+      t.contains('install suara') ||
+      t == 'tts') {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka pengaturan suara. Install paket Indonesia agar offline tetap bersuara, Sir.',
+      action: () => AppController.openSettingsPage('tts'),
     );
   }
 
@@ -479,6 +490,130 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- Bukan perintah lokal -> lempar ke Groq AI ---
+  // --- KALKULATOR SUARA (100% offline): "berapa 12 kali 3 tambah 5" ---
+  if ((s.startsWith('berapa') || s.startsWith('hitung')) &&
+      RegExp(r'\d').hasMatch(s)) {
+    final hitung = _hitung(s);
+    if (hitung != null) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Hasilnya $hitung, Sir.',
+      );
+    }
+    // Tidak bisa diparse -> biarkan Groq yang coba (tetap offline-safe).
+  }
+
+  // --- RUTIN (gabungan aksi, 100% offline): mode tidur/kerja/nonton ---
+  if (has(['mode tidur', 'selamat tidur', 'mau tidur'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mode tidur, Sir.',
+      action: () async {
+        await AppController.ringerMode('silent');
+        final r = await AppController.lockScreen();
+        return r == 'OK' ? 'SAY:Mode tidur, Sir. HP hening + terkunci.' : 'SAY:$r';
+      },
+    );
+  }
+  if (has(['mode kerja'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mode kerja, Sir.',
+      action: () async {
+        await AppController.ringerMode('normal');
+        await AppController.openApp('com.google.android.gm');
+        return 'SAY:Mode kerja, Sir. Suara normal + Gmail dibuka.';
+      },
+    );
+  }
+  if (has(['mode nonton', 'mode film'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mode nonton, Sir.',
+      action: () async {
+        await AppController.ringerMode('vibrate');
+        await AppController.openApp('com.google.android.youtube');
+        return 'SAY:Mode nonton, Sir. Getar + YouTube dibuka.';
+      },
+    );
+  }
+
+  // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---
   return ParsedCommand(handledLocally: false, reply: '');
+}
+
+/// Evaluator aritmetika mini (+ - * / dan kurung, koma desimal).
+/// Return hasil format Indonesia, atau null bila tak bisa diparse.
+String? _hitung(String s) {
+  try {
+    var e = s
+        .replaceFirst(RegExp(r'^(berapa|hitung)\s+'), '')
+        .replaceAll('tambah', '+')
+        .replaceAll('plus', '+')
+        .replaceAll('kurang', '-')
+        .replaceAll('minus', '-')
+        .replaceAll('kali', '*')
+        .replaceAll('perkalian', '*')
+        .replaceAll('bagi', '/')
+        .replaceAll('dibagi', '/')
+        .replaceAll('persen', '/100')
+        .replaceAll('%', '/100')
+        .replaceAll('koma', '.')
+        .replaceAll('x', '*')
+        .replaceAll('×', '*')
+        .replaceAll('÷', '/');
+    e = e.replaceAll(RegExp(r'[^0-9+\-*/.() ]'), ' ').trim();
+    if (!RegExp(r'\d').hasMatch(e)) return null;
+    final v = _eval(e);
+    if (v.isInfinite || v.isNaN) return null;
+    var out = v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2);
+    return out.replaceAll('.', ',');
+  } catch (_) {
+    return null;
+  }
+}
+
+double _eval(String e) {
+  final toks = RegExp(r'\d+\.?\d*|[+\-*/()]')
+      .allMatches(e.replaceAll(' ', ''))
+      .map((m) => m.group(0)!)
+      .toList();
+  int pos = 0;
+  double expr() {
+    var v = term();
+    while (pos < toks.length && (toks[pos] == '+' || toks[pos] == '-')) {
+      final op = toks[pos++];
+      final r = term();
+      v = op == '+' ? v + r : v - r;
+    }
+    return v;
+  }
+
+  double term() {
+    var v = factor();
+    while (pos < toks.length && (toks[pos] == '*' || toks[pos] == '/')) {
+      final op = toks[pos++];
+      final r = factor();
+      v = op == '*' ? v * r : v / r;
+    }
+    return v;
+  }
+
+  double factor() {
+    if (pos < toks.length && toks[pos] == '-') {
+      pos++;
+      return -factor();
+    }
+    if (pos < toks.length && toks[pos] == '(') {
+      pos++;
+      final v = expr();
+      if (pos < toks.length && toks[pos] == ')') pos++;
+      return v;
+    }
+    return double.parse(toks[pos++]);
+  }
+
+  final v = expr();
+  if (pos != toks.length) throw const FormatException('sisa token');
+  return v;
 }

@@ -87,12 +87,13 @@ class VoiceService {
     } catch (_) {}
   }
 
-  /// Dengar sekali (bukan continuous). Callback onResult dipanggil saat final.
+  /// Dengar sekali (bukan continuous).
+  /// onResult(text, final, alternates): alternates = tebakan lain STT,
+  /// dipakai home untuk akurasi (coba tiap tebakan ke perintah lokal).
   /// onLevel menerima 0..1 level suara mic (untuk meter di UI).
-  /// Mengembalikan '' + final=true bila: izin mic ditolak / STT tak tersedia /
-  /// locale gagal — UI wajib menampilkan pesan penuntun (lihat home_screen).
   Future<void> listenOnce({
-    required void Function(String text, bool finalResult) onResult,
+    required void Function(String text, bool finalResult, List<String> alternates)
+        onResult,
     void Function(double level)? onLevel,
   }) async {
     bool ok = false;
@@ -103,14 +104,25 @@ class VoiceService {
       ok = false;
     }
     if (!ok) {
-      onResult('', true);
+      onResult('', true, const []);
       return;
     }
     final locale = await _pickLocale();
     isListening = true;
     try {
       await stt.listen(
-        onResult: (r) => onResult(r.recognizedWords, r.finalResult),
+        onResult: (r) {
+          final alts = <String>[];
+          try {
+            for (final a in r.alternates) {
+              final w = a.recognizedWords.trim();
+              if (w.isNotEmpty && w != r.recognizedWords.trim()) {
+                alts.add(w);
+              }
+            }
+          } catch (_) {}
+          onResult(r.recognizedWords, r.finalResult, alts);
+        },
         localeId: locale,
         // Respon cepat: jeda hening 2 detik langsung dianggap selesai bicara.
         listenFor: const Duration(seconds: 20),
@@ -126,7 +138,7 @@ class VoiceService {
       );
     } catch (_) {
       isListening = false;
-      onResult('', true);
+      onResult('', true, const []);
     }
   }
 
