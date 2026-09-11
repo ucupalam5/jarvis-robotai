@@ -19,6 +19,7 @@ class OverlayService {
   static const String kColor = 'popup_color';
   static const String kTitle = 'popup_title';
   static const String kImage = 'popup_image'; // path file galeri, '' = ikon
+  static const String kAuto = 'popup_autolisten'; // bool: dengar tanpa tap
 
   static const String defaultIcon = 'robot';
   static const String defaultColor = '00D4FF';
@@ -65,6 +66,7 @@ class OverlayService {
       'color': sp.getString(kColor) ?? defaultColor,
       'title': sp.getString(kTitle) ?? defaultTitle,
       'image': sp.getString(kImage) ?? '',
+      'auto': (sp.getBool(kAuto) ?? false) ? '1' : '0',
     };
   }
 
@@ -78,6 +80,13 @@ class OverlayService {
     await sp.setString(kColor, color);
     await sp.setString(kTitle, title);
     await sp.setString(kImage, image);
+    await pushConfig();
+  }
+
+  /// Nyalakan/matikan auto-dengar popup (service baca saat restart).
+  static Future<void> saveAutolisten(bool on) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(kAuto, on);
     await pushConfig();
   }
 }

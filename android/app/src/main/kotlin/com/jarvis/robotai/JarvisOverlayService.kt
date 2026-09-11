@@ -1,19 +1,34 @@
 package com.jarvis.robotai
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -24,7 +39,10 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.io.File
+import java.util.Locale
+import org.json.JSONObject
 
 /**
  * Popup robot Jarvis MELAYANG di atas aplikasi lain (native, tanpa plugin).
@@ -43,8 +61,16 @@ class JarvisOverlayService : Service() {
 
     private var wm: WindowManager? = null
     private var root: View? = null
+    private var subtitleView: TextView? = null
     private var lastX = 0
     private var lastY = 120
+
+    // --- Auto-dengar: recognizer + TTS hidup di service, tanpa tap ---
+    private var recognizer: SpeechRecognizer? = null
+    private var tts: TextToSpeech? = null
+    private var autoListen = false
+    private var sessionActive = false
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -56,11 +82,20 @@ class JarvisOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         rebuildOverlay()
+        val wantAuto = prefs().getBoolean("popup_autolisten", false) ||
+            prefs().getBoolean("flutter.popup_autolisten", false)
+        if (wantAuto) startAutoListen() else stopAutoListen()
         return START_STICKY
     }
 
     override fun onDestroy() {
         running = false
+        stopAutoListen()
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (_: Exception) {}
+        tts = null
         removeOverlay()
         super.onDestroy()
     }
@@ -127,6 +162,7 @@ class JarvisOverlayService : Service() {
             root?.let { wm?.removeView(it) }
         } catch (_: Exception) {}
         root = null
+        subtitleView = null
     }
 
     private fun iconRes(key: String): Int = when (key) {
@@ -206,6 +242,7 @@ class JarvisOverlayService : Service() {
             gravity = Gravity.CENTER
         }
         box.addView(sub)
+        subtitleView = sub
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -250,14 +287,13 @@ class JarvisOverlayService : Service() {
                     if (dx * dx + dy * dy < 100 &&
                         System.currentTimeMillis() - downT < 350
                     ) {
-                        // Tap popup = buka app + LANGSUNG dengar (tanpa tap orb).
-                        try {
-                            packageManager.getLaunchIntentForPackage(packageName)?.let {
-                                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                it.putExtra("jarvis_autolisten", true)
-                                startActivity(it)
-                            }
-                        } catch (_: Exception) {}
+                        // Tap popup: kalau auto-dengar ON, paksa 1 sesi dengar.
+                        // Kalau OFF, buka app + auto-dengar sekali (tanpa tap orb).
+                        if (autoListen) {
+                            beginSession()
+                        } else {
+                            openAppAutoListen()
+                        }
                     }
                     true
                 }
@@ -271,5 +307,329 @@ class JarvisOverlayService : Service() {
         } catch (_: Exception) {
             root = null
         }
+    }
+
+    // ================= AUTO-DENGAR (tanpa tap) =================
+
+    private fun setSubtitle(s: String) {
+        try {
+            subtitleView?.text = s
+        } catch (_: Exception) {}
+    }
+
+    private fun openAppAutoListen() {
+        try {
+            packageManager.getLaunchIntentForPackage(packageName)?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                it.putExtra("jarvis_autolisten", true)
+                startActivity(it)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun startAutoListen() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            setSubtitle("STT tak tersedia di HP ini")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            setSubtitle("Butuh izin mic: buka app Jarvis sekali")
+            return
+        }
+        autoListen = true
+        ensureTts()
+        beginSession()
+    }
+
+    private fun stopAutoListen() {
+        autoListen = false
+        sessionActive = false
+        try {
+            recognizer?.cancel()
+            recognizer?.destroy()
+        } catch (_: Exception) {}
+        recognizer = null
+    }
+
+    private fun retrySoon(ms: Long = 1200) {
+        handler.removeCallbacksAndMessages(null)
+        handler.postDelayed({ beginSession() }, ms)
+    }
+
+    private fun beginSession() {
+        if (!autoListen || !running) return
+        if (sessionActive) return
+        try {
+            if (recognizer == null) {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+                recognizer?.setRecognitionListener(recListener)
+            }
+            val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+            sessionActive = true
+            setSubtitle("🎤 dengar...")
+            recognizer?.startListening(i)
+        } catch (_: Exception) {
+            sessionActive = false
+            retrySoon()
+        }
+    }
+
+    private val recListener = object : RecognitionListener {
+        override fun onReadyForSpeech(p: Bundle?) {
+            setSubtitle("🎤 dengar...")
+        }
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(v: Float) {}
+        override fun onBufferReceived(b: ByteArray?) {}
+        override fun onEndOfSpeech() {
+            setSubtitle("Proses...")
+        }
+        override fun onPartialResults(r: Bundle?) {
+            val t = r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull() ?: return
+            if (t.isNotBlank()) setSubtitle("“$t”")
+        }
+        override fun onResults(r: Bundle?) {
+            sessionActive = false
+            val t = r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()?.trim() ?: ""
+            if (t.isEmpty()) {
+                retrySoon(700)
+                return
+            }
+            handleVoiceCommand(t)
+            handler.postDelayed({ beginSession() }, 900)
+        }
+        override fun onError(code: Int) {
+            sessionActive = false
+            if (!autoListen || !running) return
+            when (code) {
+                SpeechRecognizer.ERROR_CLIENT,
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                    setSubtitle("Mic diblokir. Buka app Jarvis sekali.")
+                    autoListen = false
+                }
+                else -> retrySoon()
+            }
+        }
+        override fun onEvent(type: Int, p: Bundle?) {}
+    }
+
+    private fun ensureTts() {
+        if (tts != null) return
+        try {
+            tts = TextToSpeech(this) { st ->
+                if (st == TextToSpeech.SUCCESS) {
+                    try {
+                        val id = Locale("id", "ID")
+                        tts?.language =
+                            if (tts?.isLanguageAvailable(id) ?: 0 >= 0) id
+                            else Locale.getDefault()
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun speak(text: String) {
+        setSubtitle(if (text.length > 60) text.take(60) + "…" else text)
+        try {
+            ensureTts()
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
+        } catch (_: Exception) {}
+    }
+
+    // ---- Perintah lokal (native, tanpa buka app) ----
+
+    private val appMap = mapOf(
+        "whatsapp" to "com.whatsapp", "wa" to "com.whatsapp",
+        "youtube" to "com.google.android.youtube", "yt" to "com.google.android.youtube",
+        "instagram" to "com.instagram.android", "ig" to "com.instagram.android",
+        "tiktok" to "com.zhiliaoapp.musically",
+        "telegram" to "org.telegram.messenger",
+        "spotify" to "com.spotify.music",
+        "chrome" to "com.android.chrome",
+        "kamera" to "com.android.camera", "camera" to "com.android.camera",
+        "maps" to "com.google.android.apps.maps",
+        "gmail" to "com.google.android.gm",
+        "telepon" to "com.android.dialer",
+        "pesan" to "com.google.android.apps.messaging",
+        "sms" to "com.google.android.apps.messaging",
+        "kalkulator" to "com.google.android.calculator",
+        "jam" to "com.google.android.deskclock",
+        "alarm" to "com.google.android.deskclock",
+        "pengaturan" to "com.android.settings",
+        "setelan" to "com.android.settings"
+    )
+
+    private fun handleVoiceCommand(raw: String) {
+        val t = raw.lowercase().trim()
+        val s = t.replaceFirst(Regex("^(halo |hai |hey |hei )?jarvis[ ,]*"), "").trim()
+        try {
+            // BUKA APLIKASI
+            val open = Regex("(buka|bukain|bukakan|open|jalankan)\\s+(.+)").find(s)
+            if (open != null) {
+                var target = open.groupValues[2].replace("wasap", "whatsapp").trim()
+                var pkg: String? = appMap[target]
+                if (pkg == null) {
+                    for ((k, v) in appMap) {
+                        if (target == k || target.contains(k)) {
+                            pkg = v
+                            target = k
+                            break
+                        }
+                    }
+                }
+                if (pkg != null) {
+                    val i = packageManager.getLaunchIntentForPackage(pkg)
+                    if (i != null) {
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(i)
+                        speak("Membuka $target, Sir.")
+                        return
+                    }
+                }
+                speak("Aplikasi $target tidak ketemu, Sir.")
+                return
+            }
+            // TUTUP / HOME
+            if (s.contains("tutup") || s.contains("close")) {
+                val i = Intent(Intent.ACTION_MAIN)
+                i.addCategory(Intent.CATEGORY_HOME)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                speak("Ditutup, Sir.")
+                return
+            }
+            // KUNCI LAYAR
+            if ((s.contains("kunci") && s.contains("layar")) ||
+                s.contains("matikan layar") || s.contains("kunci hp")
+            ) {
+                try {
+                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE)
+                        as android.app.admin.DevicePolicyManager
+                    val admin = ComponentName(this, AdminReceiver::class.java)
+                    if (dpm.isAdminActive(admin)) {
+                        dpm.lockNow()
+                        return
+                    }
+                } catch (_: Exception) {}
+                speak("Aktifkan Device Admin dulu di app Jarvis ya Sir.")
+                return
+            }
+            // SENTER
+            if (s.contains("senter") || s.contains("flashlight")) {
+                try {
+                    val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    val cam = camIdList().firstOrNull()
+                    if (cam != null) {
+                        cm.setTorchMode(cam, !s.contains("mati"))
+                        speak(if (s.contains("mati")) "Senter mati." else "Senter nyala.")
+                        return
+                    }
+                } catch (_: Exception) {}
+                speak("Senter gagal, Sir.")
+                return
+            }
+            // VOLUME
+            if (s.contains("volume") || s.contains("suara")) {
+                try {
+                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val up = s.contains("naik") || s.contains("besar") || s.contains("keras")
+                    am.adjustStreamVolume(
+                        AudioManager.STREAM_MUSIC,
+                        if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                        0
+                    )
+                    speak(if (up) "Volume naik." else "Volume turun.")
+                    return
+                } catch (_: Exception) {}
+            }
+            // JAM
+            if (s.contains("jam berapa") || s == "jam") {
+                val f = java.text.SimpleDateFormat("HH:mm", Locale("id", "ID"))
+                speak("Jam ${f.format(java.util.Date())}, Sir.")
+                return
+            }
+            // BATERAI
+            if (s.contains("baterai") || s.contains("batre")) {
+                try {
+                    val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                    val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    speak("Baterai $pct persen, Sir.")
+                    return
+                } catch (_: Exception) {}
+            }
+            // Selain itu -> Groq AI
+            groqAsk(raw)
+        } catch (_: Exception) {
+            speak("Maaf Sir, ada gangguan.")
+        }
+    }
+
+    private fun camIdList(): Array<String> {
+        return try {
+            (getSystemService(Context.CAMERA_SERVICE) as CameraManager).cameraIdList
+        } catch (_: Exception) {
+            emptyArray()
+        }
+    }
+
+    private fun groqAsk(userText: String) {
+        val key = pref("groq_key", "")
+        if (key.isEmpty() || key.contains("GANTI")) {
+            speak("Isi API key Groq di app Jarvis dulu ya Sir.")
+            return
+        }
+        setSubtitle("Tanya AI...")
+        Thread {
+            try {
+                val url =
+                    java.net.URL("https://api.groq.com/openai/v1/chat/completions")
+                val c = url.openConnection() as javax.net.ssl.HttpsURLConnection
+                c.requestMethod = "POST"
+                c.connectTimeout = 20000
+                c.readTimeout = 20000
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                c.setRequestProperty("Authorization", "Bearer $key")
+                val sys = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
+                    "Bahasa Indonesia campur Inggris, singkat maks 2 kalimat, panggil user Sir."
+                val body = JSONObject()
+                    .put("model", "llama-3.3-70b-versatile")
+                    .put("temperature", 0.7)
+                    .put("max_tokens", 300)
+                    .put(
+                        "messages", org.json.JSONArray()
+                            .put(JSONObject().put("role", "system").put("content", sys))
+                            .put(JSONObject().put("role", "user").put("content", userText))
+                    ).toString()
+                c.outputStream.use { it.write(body.toByteArray()) }
+                val code = c.responseCode
+                val stream = if (code == 200) c.inputStream else c.errorStream
+                val txt = stream.bufferedReader().use { it.readText() }
+                if (code == 200) {
+                    val reply = JSONObject(txt)
+                        .getJSONArray("choices").getJSONObject(0)
+                        .getJSONObject("message").getString("content").trim()
+                    handler.post { speak(reply) }
+                } else {
+                    handler.post { speak("Groq gagal $code. Cek key atau kuota ya Sir.") }
+                }
+            } catch (e: Exception) {
+                handler.post { speak("Offline Sir. Cek internet.") }
+            }
+        }.start()
     }
 }

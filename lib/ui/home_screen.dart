@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _popColor = OverlayService.defaultColor;
   final _popTitleCtrl = TextEditingController();
   String _popImage = '';
+  bool _popAuto = false;
   double _level = 0;
   bool _handsfree = false;
   bool _silent = false;
@@ -111,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _popColor = pop['color'] ?? _popColor;
     _popTitleCtrl.text = pop['title'] ?? '';
     _popImage = pop['image'] ?? '';
+    _popAuto = pop['auto'] == '1';
     setState(() {});
     _refreshAcc(silent: true);
     _checkKey(silent: true);
@@ -617,6 +619,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String selIcon = _popIcon;
     String selColor = _popColor;
     String selImage = _popImage;
+    bool selAuto = _popAuto;
     bool saving = false;
     int statusVer = 0;
     final titleCtrl = TextEditingController(text: _popTitleCtrl.text);
@@ -822,6 +825,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (selImage.isNotEmpty)
                   const Text('✓ Gambar galeri dipilih.',
                       style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                const SizedBox(height: 8),
+                // Auto-dengar: popup dengar sendiri tanpa tap.
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: const Text('Auto-dengar popup',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 13)),
+                          ),
+                          Switch(
+                            value: selAuto,
+                            activeColor: Colors.cyanAccent,
+                            onChanged: (v) => setD(() => selAuto = v),
+                          ),
+                        ],
+                      ),
+                      const Text(
+                        'ON = robot dengar terus tanpa tap, bahkan layar mati (app boleh tutup).\nBoros baterai + indikator mic nyala terus. Butuh izin mic.',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -840,12 +876,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         color: selColor,
                         title: title,
                         image: selImage);
+                    await OverlayService.saveAutolisten(selAuto);
                     if (mounted) {
                       setState(() {
                         _popIcon = selIcon;
                         _popColor = selColor;
                         _popTitleCtrl.text = title;
                         _popImage = selImage;
+                        _popAuto = selAuto;
                       });
                     }
                     await OverlayService.hide();
@@ -882,18 +920,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         color: selColor,
                         title: title,
                         image: selImage);
+                    await OverlayService.saveAutolisten(selAuto);
                     // Verifikasi baca-balik: bukti nyata tersimpan.
                     final check = await OverlayService.readConfig();
                     final ok = check['icon'] == selIcon &&
                         check['color'] == selColor &&
                         check['title'] == title &&
-                        check['image'] == selImage;
+                        check['image'] == selImage &&
+                        check['auto'] == (selAuto ? '1' : '0');
                     if (mounted) {
                       setState(() {
                         _popIcon = selIcon;
                         _popColor = selColor;
                         _popTitleCtrl.text = title;
                         _popImage = selImage;
+                        _popAuto = selAuto;
                       });
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(ok
