@@ -10,6 +10,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
@@ -38,6 +46,8 @@ class MainActivity : FlutterActivity() {
     private var camResult: MethodChannel.Result? = null
     private val NOTIF_REQ = 2004
     private val CAM_REQ = 2005
+    private val CONTACT_REQ = 2006
+    private var contactResult: MethodChannel.Result? = null
     private var hfWl: PowerManager.WakeLock? = null
     @Volatile private var pendingAutolisten = false
 
@@ -162,10 +172,28 @@ class MainActivity : FlutterActivity() {
                         val v = call.argument<String>("variant") ?: "cyan"
                         result.success(setIcon(v))
                     }
+                    // --- Shortcut galeri ke home screen (ikon custom asli) ---
+                    "pinShortcut" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        val label = call.argument<String>("label") ?: "Jarvis"
+                        result.success(pinShortcut(path, label))
+                    }
                     // --- Auto-update: unduh APK lalu buka installer ---
                     "downloadUpdate" -> {
                         val url = call.argument<String>("url") ?: ""
                         result.success(downloadUpdate(url))
+                    }
+                    // --- Kontak: izin + cari nomor dari nama ---
+                    "requestContacts" -> requestContacts(result)
+                    "resolveContact" -> {
+                        val n = call.argument<String>("name") ?: ""
+                        result.success(resolveContact(n))
+                    }
+                    // --- Buka chat WA langsung (nomor internasional, teks opsional) ---
+                    "openWaChat" -> {
+                        val n = call.argument<String>("number") ?: ""
+                        val b = call.argument<String>("body") ?: ""
+                        result.success(openWaChat(n, b))
                     }
                     // --- Pengingat terjadwal ---
                     "setReminder" -> {
@@ -177,6 +205,23 @@ class MainActivity : FlutterActivity() {
                     "cancelReminder" -> {
                         val id = (call.argument<Number>("id")?.toLong()) ?: 0L
                         result.success(cancelReminder(id))
+                    }
+                    // --- Screenshot layar (via Accessibility, tanpa dialog) ---
+                    "screenshot" -> {
+                        Thread {
+                            try {
+                                val latch = java.util.concurrent.CountDownLatch(1)
+                                var out = "ERR:waktu habis"
+                                JarvisAccessibilityService.screenshot { r ->
+                                    out = r
+                                    latch.countDown()
+                                }
+                                latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                                runOnUiThread { result.success(out) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.success("ERR:${e.message}") }
+                            }
+                        }.start()
                     }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
@@ -526,6 +571,17 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Senter butuh izin kamera. Buka Settings HP > Apps > JARVIS > Permissions > Camera > Allow ya Sir.")
             }
+        } else if (requestCode == CONTACT_REQ) {
+            val r = contactResult
+            contactResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Butuh izin kontak untuk chat/telpon pakai nama. Buka Settings HP > Apps > JARVIS > Permissions > Contacts > Allow ya Sir.")
+            }
         }
     }
 
@@ -542,6 +598,103 @@ class MainActivity : FlutterActivity() {
         ActivityCompat.requestPermissions(
             this, arrayOf(Manifest.permission.CAMERA), CAM_REQ
         )
+    }
+
+    /** Izin kontak Android (untuk chat/telpon pakai nama). */
+    private fun requestContacts(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_CONTACTS
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        contactResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.READ_CONTACTS), CONTACT_REQ
+        )
+    }
+
+    /**
+     * Cari nomor dari nama kontak. Return "nomor|Nama Asli",
+     * "NONE:nama" bila tak ketemu, "DENIED:..." bila izin ditolak.
+     */
+    private fun resolveContact(name: String): String {
+        val q = name.trim()
+        if (q.length < 2) return "NONE:$name"
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_CONTACTS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return "DENIED:butuh izin kontak"
+        }
+        return try {
+            val uri = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+            val proj = arrayOf(
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+            )
+            // 1) cocok mengandung (misal "mama" ketemu "Mama Faresta")
+            val c1 = contentResolver.query(
+                uri, proj,
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ?",
+                arrayOf("%$q%"), null
+            )
+            c1?.use {
+                if (it.moveToFirst()) {
+                    val label = it.getString(0) ?: q
+                    var num = it.getString(1) ?: ""
+                    num = num.filter { ch -> ch.isDigit() || ch == '+' }
+                    if (num.length >= 6) return "$num|$label"
+                }
+            }
+            // 2) coba per kata (misal "faresta" saja)
+            for (w in q.split(Regex("\\s+"))) {
+                if (w.length < 3) continue
+                val c2 = contentResolver.query(
+                    uri, proj,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ?",
+                    arrayOf("%$w%"), null
+                )
+                c2?.use {
+                    if (it.moveToFirst()) {
+                        val label = it.getString(0) ?: q
+                        var num = it.getString(1) ?: ""
+                        num = num.filter { ch -> ch.isDigit() || ch == '+' }
+                        if (num.length >= 6) return "$num|$label"
+                    }
+                }
+            }
+            "NONE:$name"
+        } catch (e: Exception) {
+            "NONE:$name"
+        }
+    }
+
+    /** Buka chat WA langsung ke nomor (format 08xx -> 62xx otomatis). */
+    private fun openWaChat(number: String, body: String): String {
+        var digits = number.filter { it.isDigit() || it == '+' }
+        if (digits.startsWith("0")) digits = "62" + digits.substring(1)
+        if (digits.replace("+", "").length < 9) return "Nomor tidak valid, Sir."
+        return try {
+            var url = "https://wa.me/$digits"
+            if (body.isNotBlank()) {
+                url += "?text=" + Uri.encode(body)
+            }
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Paksa ke WhatsApp bila terinstall (tanpa browser).
+            try {
+                i.setPackage("com.whatsapp")
+                startActivity(i)
+            } catch (_: Exception) {
+                i.setPackage(null)
+                startActivity(i)
+            }
+            "OK"
+        } catch (e: Exception) {
+            "Gagal buka chat WA: ${e.message}"
+        }
     }
 
     /** Ganti ikon launcher via activity-alias (efek setelah launcher refresh). */
@@ -663,6 +816,58 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal hapus pengingat: ${e.message}"
+        }
+    }
+
+    /**
+     * Pasang shortcut berikon gambar galeri ke home screen.
+     * (Ikon LAUNCHER asli tidak bisa dari galeri — aturan Android.
+     *  Shortcut pinned adalah cara resmi yang hasilnya sama.)
+     */
+    private fun pinShortcut(path: String, label: String): String {
+        if (Build.VERSION.SDK_INT < 26) {
+            return "HP ini butuh Android 8+ untuk pin shortcut ya Sir."
+        }
+        return try {
+            val sm = getSystemService(Context.SHORTCUT_SERVICE)
+                as android.content.pm.ShortcutManager
+            if (!sm.isRequestPinShortcutSupported) {
+                return "Launcher HP tidak mendukung pin shortcut ya Sir."
+            }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            if (bounds.outWidth <= 0) return "Gambar tidak terbaca."
+            var s = 1
+            while (bounds.outWidth / s > 384 || bounds.outHeight / s > 384) s *= 2
+            val bmp = BitmapFactory.decodeFile(
+                path, BitmapFactory.Options().apply { inSampleSize = s }
+            ) ?: return "Gambar tidak terbaca."
+            val size = minOf(bmp.width, bmp.height)
+            val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+            val src = Rect(
+                (bmp.width - size) / 2, (bmp.height - size) / 2,
+                (bmp.width + size) / 2, (bmp.height + size) / 2
+            )
+            canvas.drawBitmap(bmp, src, Rect(0, 0, size, size), paint)
+            val launch =
+                (packageManager.getLaunchIntentForPackage(packageName)
+                    ?: Intent(this, MainActivity::class.java)).apply {
+                    action = Intent.ACTION_VIEW
+                    putExtra("jarvis_autolisten", true)
+                }
+            val info = android.content.pm.ShortcutInfo.Builder(this, "jarvis_custom")
+                .setShortLabel(label.take(20).ifBlank { "Jarvis" })
+                .setIcon(Icon.createWithBitmap(out))
+                .setIntent(launch)
+                .build()
+            sm.requestPinShortcut(info, null)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal pasang shortcut: ${e.message}"
         }
     }
 

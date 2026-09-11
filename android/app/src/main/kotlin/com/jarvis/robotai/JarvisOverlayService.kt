@@ -25,6 +25,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.AlarmClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -515,9 +516,9 @@ class JarvisOverlayService : Service() {
             return false
         }
         try {
-            // BUKA APLIKASI (layar/hp/hape = perintah daya, BUKAN app)
+            // BUKA APLIKASI (layar/hp/hape/alarm = perintah daya/jam, BUKAN app)
             if (has(listOf("buka", "open", "jalankan", "nyalain", "idupin", "hidupin")) &&
-                !has(listOf("layar", "hp", "hape", "handphone", "senter", "lampu"))
+                !has(listOf("layar", "hp", "hape", "handphone", "alarm", "senter", "lampu"))
             ) {
                 var target = s.replace(
                     Regex("(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|idupin|hidupin)"),
@@ -637,6 +638,50 @@ class JarvisOverlayService : Service() {
                     speak("Baterai $pct persen, Sir.")
                     return
                 } catch (_: Exception) {}
+            }
+            // ALARM: "pasang alarm jam 7 pagi" (buka jam sistem terisi)
+            if (s.contains("alarm")) {
+                val num = Regex("(\\d{1,2})(?:[:.](\\d{2}))?").find(s)
+                if (num != null) {
+                    var h = num.groupValues[1].toInt()
+                    val m = if (num.groupValues[2].isNotEmpty()) {
+                        num.groupValues[2].toInt()
+                    } else {
+                        0
+                    }
+                    if ((s.contains("siang") || s.contains("sore") ||
+                                s.contains("malam")) && h < 12
+                    ) {
+                        h += 12
+                    }
+                    if (h in 0..23 && m in 0..59) {
+                        try {
+                            val i = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+                                putExtra(AlarmClock.EXTRA_HOUR, h)
+                                putExtra(AlarmClock.EXTRA_MINUTES, m)
+                                putExtra(AlarmClock.EXTRA_MESSAGE, "Jarvis")
+                                putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(i)
+                            speak("Membuka jam untuk alarm, Sir.")
+                            return
+                        } catch (_: Exception) {}
+                    }
+                }
+                speak("Jam berapa alarmnya Sir? Contoh: pasang alarm jam 6 pagi.")
+                return
+            }
+            // LIHAT LAYAR: screenshot + AI vision menjelaskan.
+            if (has(
+                    listOf(
+                        "lihat layar", "baca layar", "tangkap layar",
+                        "screenshot", "apa yang tampil", "apa di layar"
+                    )
+                )
+            ) {
+                screenshotAndAsk()
+                return
             }
             // MODE DERING HP
             if (s.contains("mode getar") || s == "getar") {
@@ -861,6 +906,114 @@ class JarvisOverlayService : Service() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun screenshotAndAsk() {
+        setSubtitle("Lihat layar...")
+        JarvisAccessibilityService.screenshot { r ->
+            handler.post {
+                if (r.startsWith("ERR:")) {
+                    speak(r.removePrefix("ERR:"))
+                    return@post
+                }
+                groqAskVision(r)
+            }
+        }
+    }
+
+    /** Tanya AI vision dengan gambar screenshot (model multimodal + cadangan). */
+    private fun groqAskVision(path: String) {
+        val key = pref("groq_key", "")
+        if (key.isEmpty() || key.contains("GANTI")) {
+            speak("Isi API key Groq di app Jarvis dulu ya Sir.")
+            return
+        }
+        setSubtitle("Analisa layar...")
+        Thread {
+            val models = listOf(
+                "meta-llama/llama-4-maverick-17b-128e-instruct",
+                "meta-llama/llama-4-scout-17b-16e-instruct"
+            )
+            var done = false
+            var lastCode = -1
+            var b64 = ""
+            try {
+                val bytes = File(path).readBytes()
+                if (bytes.size > 4 * 1024 * 1024) {
+                    handler.post { speak("Gambar layar terlalu besar Sir.") }
+                    return@Thread
+                }
+                b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            } catch (_: Exception) {
+                handler.post { speak("Gagal baca gambar layar Sir.") }
+                return@Thread
+            }
+            val q = "Lihat gambar screenshot layar HP ini. Jelaskan singkat " +
+                "dalam Bahasa Indonesia apa yang tampil dan info pentingnya, " +
+                "maksimal 3 kalimat. Panggil user Sir."
+            for (model in models) {
+                if (done) break
+                try {
+                    val url =
+                        java.net.URL("https://api.groq.com/openai/v1/chat/completions")
+                    val c = url.openConnection() as javax.net.ssl.HttpsURLConnection
+                    c.requestMethod = "POST"
+                    c.connectTimeout = 20000
+                    c.readTimeout = 30000
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json")
+                    c.setRequestProperty("Authorization", "Bearer $key")
+                    val body = JSONObject()
+                        .put("model", model)
+                        .put("temperature", 0.5)
+                        .put("max_tokens", 300)
+                        .put(
+                            "messages", org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("role", "user")
+                                    .put(
+                                        "content", org.json.JSONArray()
+                                            .put(
+                                                JSONObject()
+                                                    .put("type", "text")
+                                                    .put("content", q)
+                                            )
+                                            .put(
+                                                JSONObject()
+                                                    .put("type", "image_url")
+                                                    .put(
+                                                        "image_url", JSONObject().put(
+                                                            "url",
+                                                            "data:image/jpeg;base64,$b64"
+                                                        )
+                                                    )
+                                            )
+                                    )
+                            )
+                        ).toString()
+                    c.outputStream.use { it.write(body.toByteArray()) }
+                    val code = c.responseCode
+                    lastCode = code
+                    val stream = if (code == 200) c.inputStream else c.errorStream
+                    val txt = stream.bufferedReader().use { it.readText() }
+                    if (code == 200) {
+                        val reply = JSONObject(txt)
+                            .getJSONArray("choices").getJSONObject(0)
+                            .getJSONObject("message").getString("content").trim()
+                        done = true
+                        handler.post { speak(reply) }
+                    } else if (code == 401) {
+                        done = true
+                        handler.post { speak("API key salah Sir.") }
+                    }
+                } catch (_: Exception) {
+                    lastCode = -2
+                }
+            }
+            if (!done) {
+                handler.post { speak("Vision gagal ($lastCode). Coba lagi ya Sir.") }
+            }
+        }.start()
     }
 
     private fun groqAsk(userText: String) {

@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:io';
 
+import 'package:http/http.dart' as http;
 /// Otak AI pakai Groq (gratis). Daftar key di https://console.groq.com
 /// Model: gpt-oss-120b (utama) + cadangan otomatis bila 404.
 class GroqService {
@@ -94,6 +95,69 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
       return 'Sir, kuota gratis Groq habis (429). Tunggu ~1 menit lalu coba lagi ya Sir.';
     }
     return 'Sir, semua model Groq gagal ($lastErr). Cek internet / key / kuota ya Sir.';
+  }
+
+  /// Tanya AI dengan gambar (screenshot layar). Model vision + fallback.
+  Future<String> askVision(String imagePath, String question) async {
+    if (apiKey.isEmpty) {
+      return 'Sir, Groq API key belum dipasang. Masukkan di Settings ya Sir.';
+    }
+    String b64;
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      if (bytes.length > 4 * 1024 * 1024) {
+        return 'Sir, gambar layar terlalu besar.';
+      }
+      b64 = base64Encode(bytes);
+    } catch (e) {
+      return 'Sir, gagal baca gambar layar: $e';
+    }
+    const models = [
+      'meta-llama/llama-4-maverick-17b-128e-instruct',
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+    ];
+    String lastErr = '';
+    for (final m in models) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse(_url),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $apiKey',
+              },
+              body: jsonEncode({
+                'model': m,
+                'temperature': 0.5,
+                'max_tokens': 300,
+                'messages': [
+                  {
+                    'role': 'user',
+                    'content': [
+                      {'type': 'text', 'text': question},
+                      {
+                        'type': 'image_url',
+                        'image_url': {'url': 'data:image/jpeg;base64,$b64'}
+                      },
+                    ],
+                  }
+                ],
+              }),
+            )
+            .timeout(const Duration(seconds: 30));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          return (data['choices'][0]['message']['content'] as String).trim();
+        }
+        if (res.statusCode == 401) {
+          return 'Sir, API key salah/expired (401).';
+        }
+        lastErr = '${res.statusCode}';
+      } catch (e) {
+        lastErr = '$e';
+      }
+    }
+    return 'Sir, AI vision gagal ($lastErr). Coba lagi ya Sir.';
   }
 }
 

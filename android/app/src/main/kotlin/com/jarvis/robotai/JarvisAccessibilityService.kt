@@ -2,10 +2,15 @@ package com.jarvis.robotai
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.Bitmap
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Otomatisasi Jarvis TANPA root / TANPA aplikasi tambahan.
@@ -17,6 +22,7 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile private var instance: JarvisAccessibilityService? = null
+        @Volatile private var shotCb: ((String) -> Unit)? = null
 
         fun isEnabled(): Boolean = instance != null
 
@@ -127,6 +133,70 @@ class JarvisAccessibilityService : AccessibilityService() {
                 if (r != null) return r
             }
             return null
+        }
+
+        /**
+         * Screenshot layar TANPA dialog (khusus AccessibilityService, Android 11+).
+         * Callback: path file JPG, atau "ERR:pesan".
+         */
+        fun screenshot(cb: (String) -> Unit) {
+            val s = instance
+            if (s == null) {
+                cb("ERR:Aksesibilitas belum aktif. Aktifkan: Settings HP > Accessibility > Jarvis > ON.")
+                return
+            }
+            if (Build.VERSION.SDK_INT < 30) {
+                cb("ERR:Lihat layar butuh Android 11+ ya Sir.")
+                return
+            }
+            if (shotCb != null) {
+                cb("ERR:Sibuk, coba lagi sebentar ya Sir.")
+                return
+            }
+            shotCb = cb
+            try {
+                s.takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    s.mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(result: ScreenshotResult) {
+                            shotCb = null
+                            try {
+                                val bmp = Bitmap.wrapHardwareBuffer(
+                                    result.hardwareBuffer, result.colorSpace
+                                )
+                                try {
+                                    if (bmp == null) {
+                                        cb("ERR:Gagal baca gambar layar.")
+                                        return
+                                    }
+                                    val out = File(s.cacheDir, "jarvis_shot.jpg")
+                                    FileOutputStream(out).use {
+                                        bmp.compress(
+                                            Bitmap.CompressFormat.JPEG, 70, it
+                                        )
+                                    }
+                                    cb(out.absolutePath)
+                                } finally {
+                                    try {
+                                        result.hardwareBuffer.close()
+                                    } catch (_: Exception) {}
+                                }
+                            } catch (e: Exception) {
+                                cb("ERR:Gagal simpan screenshot: ${e.message}")
+                            }
+                        }
+
+                        override fun onFailure(code: Int) {
+                            shotCb = null
+                            cb("ERR:Screenshot ditolak sistem ($code).")
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                shotCb = null
+                cb("ERR:Screenshot gagal: ${e.message}")
+            }
         }
     }
 

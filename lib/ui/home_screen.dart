@@ -85,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _consumeAutolisten();
+      _refreshAcc(silent: true);
     }
   }
 
@@ -345,6 +346,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (res == 'SHOW_APPS:') {
       if (mounted) _openAppsDialog();
       return reply;
+    }
+    if (res.startsWith('VISION:')) {
+      final ans = await widget.groq.askVision(
+        res.substring('VISION:'.length),
+        'Lihat gambar screenshot layar HP ini. Jelaskan singkat dalam Bahasa Indonesia apa yang tampil dan info pentingnya, maksimal 3 kalimat. Panggil user Sir.',
+      );
+      _history.add({'role': 'user', 'content': text});
+      _history.add({'role': 'assistant', 'content': ans});
+      return ans;
     }
     if (res.startsWith('SAY:')) return res.substring('SAY:'.length);
     if (res.startsWith('BATERAI_REPLY:')) {
@@ -819,10 +829,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 4),
-          // Status otomatisasi (tap = cek ulang, tahan = buka pengaturan).
+          // Status otomatisasi (tap = LANGSUNG buka pengaturannya).
           GestureDetector(
-            onTap: () => _refreshAcc(),
-            onLongPress: () async {
+            onTap: () async {
               await AppController.accOpenSettings();
               _refreshAcc();
             },
@@ -841,8 +850,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               child: Text(
                 _acc == 'OK'
-                    ? '● Otomatisasi ON — tap cek, tahan buka pengaturan'
-                    : '● Otomatisasi: $_acc',
+                    ? '● Otomatisasi ON — tap untuk pengaturan'
+                    : '● Otomatisasi: $_acc — TAP UNTUK AKTIFKAN',
                 style:
                     const TextStyle(color: Colors.white70, fontSize: 11),
                 textAlign: TextAlign.center,
@@ -1544,6 +1553,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Text('✓ Background galeri aktif.',
                   style: TextStyle(
                       color: Colors.greenAccent, fontSize: 12)),
+            const SizedBox(height: 8),
+            const Text('Ikon galeri di layar utama:',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text(
+                'Ikon launcher ASLI tidak bisa dari galeri (aturan Android).\nPengganti resmi: shortcut bergambar galeri di home screen.',
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final r = await AppController.pickImage();
+                if (r == 'BATAL') return;
+                if (!r.startsWith('/')) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(r)));
+                  }
+                  return;
+                }
+                final pin =
+                    await AppController.pinShortcut(r, 'Jarvis');
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(pin == 'OK'
+                          ? 'Konfirmasi pemasangan di layar, Sir.'
+                          : pin)));
+                }
+              },
+              icon: const Icon(Icons.add_to_home_screen, size: 16),
+              label: const Text('Pasang ikon galeri ke layar',
+                  style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent)),
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () => _checkUpdate(),

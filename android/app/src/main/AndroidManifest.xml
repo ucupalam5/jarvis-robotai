@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Baca kontak (chat WA / telpon pakai nama, bukan angka) -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Auto-update: install APK dari GitHub Release -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Pengingat terjadwal (coba exact, fallback biasa bila ditolak) -->

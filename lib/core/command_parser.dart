@@ -93,9 +93,9 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "bukain ig dong" ---
-  // (layar/hp/hape/senter/lampu dikecualikan: itu perintah daya, BUKAN app)
+  // (layar/hp/hape/alarm/senter/lampu dikecualikan: itu perintah daya/jam)
   if (has(['buka', 'bukain', 'bukakan', 'open', 'jalankan', 'nyalain', 'idupin', 'hidupin']) &&
-      !has(['layar', 'hp', 'hape', 'handphone', 'senter', 'lampu'])) {
+      !has(['layar', 'hp', 'hape', 'handphone', 'alarm', 'senter', 'lampu'])) {
     String target = s
         .replaceAll(
             RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain|idupin|hidupin)'),
@@ -277,7 +277,7 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- TELEPON: "telpon 0812..." (buka dialer, tanpa izin CALL_PHONE) ---
+  // --- TELEPON: "telpon 0812..." / "telpon mama" (buka dialer terisi) ---
   if (t.startsWith('telpon') ||
       t.startsWith('telepon') ||
       t.startsWith('call ') ||
@@ -288,6 +288,33 @@ ParsedCommand parseLocalCommand(String rawText) {
         handledLocally: true,
         reply: 'Membuka dialer, Sir.',
         action: () => AppController.dial(digits),
+      );
+    }
+    final nama = t
+        .replaceFirst(RegExp(r'^(telpon|telepon|call|hubungi)\s+'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (nama.length >= 2) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Mencari kontak $nama, Sir.',
+        action: () async {
+          final perm = await AppController.requestContacts();
+          if (perm != 'OK') return 'SAY:$perm';
+          final found = await AppController.resolveContact(nama);
+          if (found.startsWith('NONE:')) {
+            return 'SAY:Kontak $nama tidak ketemu di HP, Sir.';
+          }
+          if (found.startsWith('DENIED:')) {
+            return 'SAY:${found.substring('DENIED:'.length)}';
+          }
+          final sep = found.indexOf('|');
+          final num = found.substring(0, sep);
+          final label = found.substring(sep + 1);
+          final r = await AppController.dial(num);
+          if (r != 'OK') return 'SAY:$r';
+          return 'SAY:Membuka dialer $label, Sir. Tap panggil.';
+        },
       );
     }
     return ParsedCommand(
@@ -313,6 +340,60 @@ ParsedCommand parseLocalCommand(String rawText) {
       handledLocally: true,
       reply: 'Sir, contohnya: sms ke 081234567890 pesannya halo bro.',
     );
+  }
+
+  // --- CHAT WA: "buka wa chat mama" / "wa ke 0812 halo bro" ---
+  // Nama kontak dicari di HP (butuh izin kontak), nomor langsung gas.
+  if (has(['wa', 'whatsapp']) && has(['chat', 'pesan', 'kirim', 'ke'])) {
+    // Ambil nama/nomor setelah kata 'chat'/'ke', buang kata 'wa'.
+    var rest = s
+        .replaceFirst(RegExp(r'^(buka|bukain|tolong|dong|coba)\s+'), '')
+        .replaceAll(RegExp(r'\b(wa|whatsapp)\b'), ' ')
+        .replaceFirst(RegExp(r'^(ke|chat|pesan|kirim)\s+'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    // Pisahkan pesan: "... pesannya halo" -> nama + isi.
+    var body = '';
+    final bodyM =
+        RegExp(r'(pesannya|isinya|\bpesan\b)\s+(.+)').firstMatch(rest);
+    if (bodyM != null) {
+      body = bodyM.group(2)!.trim();
+      rest = rest.replaceFirst(bodyM.group(0)!, '').trim();
+    }
+    final digits =
+        RegExp(r'\+?\d[\d ]{5,}').firstMatch(rest)?.group(0) ?? '';
+    if (digits.replaceAll(RegExp(r'\D'), '').length >= 6) {
+      final num = digits;
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Membuka chat WA, Sir.',
+        action: () => AppController.openWaChat(num, body),
+      );
+    }
+    if (rest.length >= 2) {
+      final nama = rest;
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Mencari kontak $nama, Sir.',
+        action: () async {
+          final perm = await AppController.requestContacts();
+          if (perm != 'OK') return 'SAY:$perm';
+          final found = await AppController.resolveContact(nama);
+          if (found.startsWith('NONE:')) {
+            return 'SAY:Kontak $nama tidak ketemu di HP, Sir. Coba nama lain.';
+          }
+          if (found.startsWith('DENIED:')) {
+            return 'SAY:${found.substring('DENIED:'.length)}';
+          }
+          final sep = found.indexOf('|');
+          final num = found.substring(0, sep);
+          final label = found.substring(sep + 1);
+          final r = await AppController.openWaChat(num, body);
+          if (r != 'OK') return 'SAY:$r';
+          return 'SAY:Membuka chat $label, Sir.';
+        },
+      );
+    }
   }
 
   // --- CARI GOOGLE: "cari resep rendang" / "search ..." ---
@@ -620,6 +701,24 @@ ParsedCommand parseLocalCommand(String rawText) {
         }
         await sp.remove('jarvis_reminders');
         return 'SAY:Semua pengingat dihapus, Sir.';
+      },
+    );
+  }
+
+  // --- LIHAT LAYAR: AI membaca screenshot ("lihat layar") ---
+  if (has([
+    'lihat layar', 'baca layar', 'tangkap layar', 'screenshot',
+    'apa yang tampil', 'apa di layar', 'jelaskan layar'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Melihat layar, Sir.',
+      action: () async {
+        final shot = await AppController.screenshot();
+        if (shot.startsWith('ERR:')) {
+          return 'SAY:${shot.substring('ERR:'.length)}';
+        }
+        return 'VISION:$shot';
       },
     );
   }

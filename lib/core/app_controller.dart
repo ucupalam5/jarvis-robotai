@@ -64,15 +64,29 @@ class AppController {
   static Future<String> setIcon(String variant) =>
       _invoke('setIcon', {'variant': variant});
 
+  // --- Shortcut galeri ke home screen ---
+  static Future<String> pinShortcut(String path, String label) =>
+      _invoke('pinShortcut', {'path': path, 'label': label});
+
   // --- Auto-update GitHub Release ---
   static Future<String> downloadUpdate(String url) =>
       _invoke('downloadUpdate', {'url': url});
+
+  // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
+  static Future<String> requestContacts() => _invoke('requestContacts');
+  static Future<String> resolveContact(String name) =>
+      _invoke('resolveContact', {'name': name});
+  static Future<String> openWaChat(String number, String body) =>
+      _invoke('openWaChat', {'number': number, 'body': body});
 
   // --- Pengingat terjadwal ---
   static Future<String> setReminder(int id, int at, String text) =>
       _invoke('setReminder', {'id': id, 'at': at, 'text': text});
   static Future<String> cancelReminder(int id) =>
       _invoke('cancelReminder', {'id': id});
+
+  // --- Screenshot layar (AI bisa melihat) ---
+  static Future<String> screenshot() => _invoke('screenshot');
 
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
