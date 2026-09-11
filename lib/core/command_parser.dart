@@ -564,7 +564,7 @@ String? _hitung(String s) {
         .replaceAll('÷', '/');
     e = e.replaceAll(RegExp(r'[^0-9+\-*/.() ]'), ' ').trim();
     if (!RegExp(r'\d').hasMatch(e)) return null;
-    final v = _eval(e);
+    final v = _Calc(e).run();
     if (v.isInfinite || v.isNaN) return null;
     var out = v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2);
     return out.replaceAll('.', ',');
@@ -573,12 +573,43 @@ String? _hitung(String s) {
   }
 }
 
-double _eval(String e) {
-  final toks = RegExp(r'\d+\.?\d*|[+\-*/()]')
-      .allMatches(e.replaceAll(' ', ''))
-      .map((m) => m.group(0)!)
-      .toList();
+/// Parser aritmetika mini (+ - * / dan kurung). Class agar method
+/// bisa saling memanggil (fungsi lokal Dart tak boleh forward-reference).
+class _Calc {
+  final List<String> toks;
   int pos = 0;
+
+  _Calc(String e)
+      : toks = RegExp(r'\d+\.?\d*|[+\-*/()]')
+            .allMatches(e.replaceAll(' ', ''))
+            .map((m) => m.group(0)!)
+            .toList();
+
+  double run() {
+    final v = expr();
+    if (pos != toks.length) throw const FormatException('sisa token');
+    return v;
+  }
+
+  double expr() {
+    var v = term();
+    while (pos < toks.length && (toks[pos] == '+' || toks[pos] == '-')) {
+      final op = toks[pos++];
+      final r = term();
+      v = op == '+' ? v + r : v - r;
+    }
+    return v;
+  }
+
+  double term() {
+    var v = factor();
+    while (pos < toks.length && (toks[pos] == '*' || toks[pos] == '/')) {
+      final op = toks[pos++];
+      final r = factor();
+      v = op == '*' ? v * r : v / r;
+    }
+    return v;
+  }
 
   double factor() {
     if (pos < toks.length && toks[pos] == '-') {
@@ -593,28 +624,4 @@ double _eval(String e) {
     }
     return double.parse(toks[pos++]);
   }
-
-  double term() {
-    var v = factor();
-    while (pos < toks.length && (toks[pos] == '*' || toks[pos] == '/')) {
-      final op = toks[pos++];
-      final r = factor();
-      v = op == '*' ? v * r : v / r;
-    }
-    return v;
-  }
-
-  double expr() {
-    var v = term();
-    while (pos < toks.length && (toks[pos] == '+' || toks[pos] == '-')) {
-      final op = toks[pos++];
-      final r = term();
-      v = op == '+' ? v + r : v - r;
-    }
-    return v;
-  }
-
-  final v = expr();
-  if (pos != toks.length) throw const FormatException('sisa token');
-  return v;
 }
