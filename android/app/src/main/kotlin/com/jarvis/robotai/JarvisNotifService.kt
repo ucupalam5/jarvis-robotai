@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.app.RemoteInput
-import android.os.Bundle
 
 /**
  * Telinga Jarvis: dengar notifikasi WA/Telegram/SMS/Email masuk.

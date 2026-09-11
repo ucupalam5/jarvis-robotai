@@ -24,7 +24,7 @@ import android.telephony.SmsMessage
 class SmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != Telephony.SmsIntents.SMS_RECEIVED_ACTION) return
+        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         try {
             val sp = ctx.getSharedPreferences(
                 "FlutterSharedPreferences", Context.MODE_PRIVATE
