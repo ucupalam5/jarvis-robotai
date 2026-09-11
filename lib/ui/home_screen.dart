@@ -995,7 +995,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ],
                   ),
                 ),
-                // Preview persis pilihan saat ini (bukti sebelum save).                Center(
+                // Preview persis pilihan saat ini (bukti sebelum save).
+                Center(
                   child: Builder(builder: (_) {
                     Color c;
                     try {

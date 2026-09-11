@@ -117,6 +117,19 @@ class MainActivity : FlutterActivity() {
                             Settings.canDrawOverlays(this)
                         ) "YA" else "TIDAK"
                     )
+                    "overlayRequest" -> {
+                        try {
+                            val i = Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(i)
+                            result.success("OK")
+                        } catch (e: Exception) {
+                            result.success("Gagal buka halaman izin: ${e.message}")
+                        }
+                    }
                     // --- Handsfree: tahan CPU redup agar mic tetap dengar ---
                     "handsfreeWake" -> {
                         val on = call.argument<Boolean>("on") ?: false

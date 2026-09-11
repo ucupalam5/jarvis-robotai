@@ -42,6 +42,7 @@ class AppController {
   static Future<String> overlayHide() => _invoke('overlayHide');
   static Future<String> overlayActive() => _invoke('overlayActive');
   static Future<String> overlayPerm() => _invoke('overlayPerm');
+  static Future<String> overlayRequest() => _invoke('overlayRequest');
 
   // --- Handsfree wake lock ---
   static Future<String> handsfreeWake(bool on) =>

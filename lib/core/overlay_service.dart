@@ -41,6 +41,18 @@ class OverlayService {
     if (!on) await hide();
   }
 
+  /// Izin overlay sistem. Bila belum ada, buka halaman izin agar user
+  /// aktifkan manual, lalu kembalikan false (tap popup sekali lagi).
+  static Future<bool> ensurePermission() async {
+    try {
+      if (await AppController.overlayPerm() == 'YA') return true;
+      await AppController.overlayRequest();
+      return await AppController.overlayPerm() == 'YA';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// true bila popup benar-benar tampil (dicek ulang setelah jeda).
   static Future<bool> show() async {
     if (!await isEnabled()) return false;
