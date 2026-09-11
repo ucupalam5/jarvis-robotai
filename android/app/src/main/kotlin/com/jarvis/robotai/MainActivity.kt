@@ -281,16 +281,27 @@ class MainActivity : FlutterActivity() {
 
     private fun wakeUp(): String {
         return try {
-            // Nyalakan layar via WakeLock (tanpa root/Shizuku).
-            // Catatan: hanya menyalakan layar. PIN/fingerprint tetap manual.
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            @Suppress("DEPRECATION")
-            val wl = pm.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "jarvis:wakeup"
-            )
-            wl.acquire(3000)
-            wl.release()
+            // 1) WakeLock: paksa CPU/layar bangun.
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                @Suppress("DEPRECATION")
+                val wl = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                        PowerManager.ON_AFTER_RELEASE,
+                    "jarvis:wakeup"
+                )
+                wl.acquire(5000)
+            } catch (_: Exception) {}
+            // 2) Activity transparan: andal di HP baru (WakeLock saja sering
+            // diabaikan Android 10+). Butuh izin overlay bila dari background.
+            try {
+                val i = Intent(this, WakeActivity::class.java)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+            } catch (e: Exception) {
+                return "Layar dicoba dinyalakan. Kalau tetap mati, beri izin overlay: Settings HP > Apps > JARVIS > Display over other apps > Allow."
+            }
             "OK"
         } catch (e: Exception) {
             "Gagal menyalakan layar: ${e.message}"

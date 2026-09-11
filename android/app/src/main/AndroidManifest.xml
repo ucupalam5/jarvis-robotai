@@ -49,6 +49,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Activity transparan untuk menyalakan layar (tanpa PC/root) -->
+        <activity
+            android:name=".WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Device Admin untuk kunci layar (matikan layar) -->
         <receiver
             android:name=".AdminReceiver"

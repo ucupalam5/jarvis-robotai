@@ -549,6 +549,22 @@ class JarvisOverlayService : Service() {
                 speak("Ditutup, Sir.")
                 return
             }
+            // NYALAKAN LAYAR (layar-mati, bukan mati total).
+            // WakeLock + Activity transparan + coba swipe kunci geser.
+            if (has(
+                    listOf(
+                        "nyalakan layar", "nyalakan hp", "nyalakan hape",
+                        "nyalain layar", "nyalain hp", "nyalain hape",
+                        "idupin layar", "idupin hp",
+                        "hidupkan layar", "hidupkan hp",
+                        "bangun", "wake up"
+                    )
+                )
+            ) {
+                wakeScreen()
+                speak("Layar dinyalakan, Sir.")
+                return
+            }
             // KUNCI LAYAR
             val mauKunci = (has(listOf("kunci", "matiin", "matikan")) &&
                 has(listOf("layar", "hp", "hape"))) || has(listOf("lock"))
@@ -615,8 +631,33 @@ class JarvisOverlayService : Service() {
         }
     }
 
-    private fun camIdList(): Array<String> {
-        return try {
+    /** Nyalakan layar dari service: WakeLock + Activity transparan + swipe. */
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE,
+                "jarvis:wakeupSvc"
+            )
+            wl.acquire(5000)
+        } catch (_: Exception) {}
+        try {
+            val i = Intent(this, WakeActivity::class.java)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+        } catch (_: Exception) {}
+        // Coba buka kunci geser sesaat setelah layar nyala.
+        handler.postDelayed({
+            try {
+                JarvisAccessibilityService.swipeUp()
+            } catch (_: Exception) {}
+        }, 1200)
+    }
+
+    private fun camIdList(): Array<String> {        return try {
             (getSystemService(Context.CAMERA_SERVICE) as CameraManager).cameraIdList
         } catch (_: Exception) {
             emptyArray()
