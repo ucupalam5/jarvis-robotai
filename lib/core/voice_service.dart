@@ -112,8 +112,9 @@ class VoiceService {
       await stt.listen(
         onResult: (r) => onResult(r.recognizedWords, r.finalResult),
         localeId: locale,
+        // Respon cepat: jeda hening 2 detik langsung dianggap selesai bicara.
         listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 4),
+        pauseFor: const Duration(seconds: 2),
         partialResults: true,
         onSoundLevelChange: onLevel == null
             ? null

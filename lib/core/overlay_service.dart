@@ -23,7 +23,7 @@ class OverlayService {
 
   static const String defaultIcon = 'robot';
   static const String defaultColor = '00D4FF';
-  static const String defaultTitle = 'JARVIS standby...';
+  static const String defaultTitle = 'jarvis';
 
   /// true bila popup benar-benar tampil (dicek ulang setelah jeda).
   static Future<bool> show() async {

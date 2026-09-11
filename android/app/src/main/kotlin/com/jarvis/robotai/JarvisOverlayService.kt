@@ -62,6 +62,7 @@ class JarvisOverlayService : Service() {
     private var wm: WindowManager? = null
     private var root: View? = null
     private var subtitleView: TextView? = null
+    private var dotView: View? = null
     private var lastX = 0
     private var lastY = 120
 
@@ -195,21 +196,16 @@ class JarvisOverlayService : Service() {
         val w = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         wm = w
         val a = accent()
-        val title = pref("popup_title", "JARVIS standby...")
+        val title = pref("popup_title", "jarvis")
         val iconKey = pref("popup_icon", "robot")
         val imgPath = pref("popup_image", "")
         val d = dp(1f)
 
+        // MINIMALIS: tanpa background box, hanya ikon + nama + titik status.
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(12 * d, 12 * d, 12 * d, 12 * d)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 20f * d
-                setColor(0xCC0A1628.toInt())
-                setStroke(2 * d, a)
-            }
+            setPadding(8 * d, 8 * d, 8 * d, 8 * d)
         }
 
         val iv = ImageView(this)
@@ -231,18 +227,24 @@ class JarvisOverlayService : Service() {
         val tv = TextView(this).apply {
             text = title
             setTextColor(a)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             gravity = Gravity.CENTER
+            setShadowLayer(6f, 0f, 0f, Color.BLACK)
         }
         box.addView(tv)
-        val sub = TextView(this).apply {
-            text = "Tap untuk bicara"
-            setTextColor(Color.parseColor("#B3FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            gravity = Gravity.CENTER
+        // Titik status kecil: cyan = standby, hijau = dengar, oranye = proses.
+        val dot = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(a)
+            }
         }
-        box.addView(sub)
-        subtitleView = sub
+        val dotP = LinearLayout.LayoutParams(10 * d, 10 * d).apply {
+            topMargin = 4 * d
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        box.addView(dot, dotP)
+        dotView = dot
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -311,10 +313,27 @@ class JarvisOverlayService : Service() {
 
     // ================= AUTO-DENGAR (tanpa tap) =================
 
-    private fun setSubtitle(s: String) {
+    /** Status popup = warna titik (nama + ikon tidak diubah). */
+    private fun setDot(c: Int) {
         try {
-            subtitleView?.text = s
+            val v = dotView ?: return
+            v.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(c)
+            }
         } catch (_: Exception) {}
+    }
+
+    private fun setSubtitle(s: String) {
+        // Teks status tidak ditampilkan (popup minimalis: ikon + nama saja).
+        // Dipetakan ke warna titik agar user tetap tahu kondisi.
+        val lower = s.lowercase()
+        when {
+            lower.contains("dengar") || lower.contains("“") -> setDot(0xFF00FF9D.toInt())
+            lower.contains("tanya") || lower.contains("proses") -> setDot(0xFFFFB300.toInt())
+            lower.contains("mic diblokir") || lower.contains("gagal") -> setDot(0xFFFF4D6D.toInt())
+            else -> setDot(accent())
+        }
     }
 
     private fun openAppAutoListen() {
@@ -513,8 +532,9 @@ class JarvisOverlayService : Service() {
                 return
             }
             // KUNCI LAYAR
-            if ((s.contains("kunci") && s.contains("layar")) ||
-                s.contains("matikan layar") || s.contains("kunci hp")
+            if (((s.contains("kunci") || s.contains("matiin") || s.contains("matikan")) &&
+                        (s.contains("layar") || s.contains("hp") || s.contains("hape"))) ||
+                s.contains("lock")
             ) {
                 try {
                     val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE)
@@ -594,39 +614,67 @@ class JarvisOverlayService : Service() {
         }
         setSubtitle("Tanya AI...")
         Thread {
-            try {
-                val url =
-                    java.net.URL("https://api.groq.com/openai/v1/chat/completions")
-                val c = url.openConnection() as javax.net.ssl.HttpsURLConnection
-                c.requestMethod = "POST"
-                c.connectTimeout = 20000
-                c.readTimeout = 20000
-                c.doOutput = true
-                c.setRequestProperty("Content-Type", "application/json")
-                c.setRequestProperty("Authorization", "Bearer $key")
-                val sys = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
-                    "Bahasa Indonesia campur Inggris, singkat maks 2 kalimat, panggil user Sir."
-                val body = JSONObject()
-                    .put("model", "llama-3.3-70b-versatile")
-                    .put("temperature", 0.7)
-                    .put("max_tokens", 300)
-                    .put(
-                        "messages", org.json.JSONArray()
-                            .put(JSONObject().put("role", "system").put("content", sys))
-                            .put(JSONObject().put("role", "user").put("content", userText))
-                    ).toString()
-                c.outputStream.use { it.write(body.toByteArray()) }
-                val code = c.responseCode
-                val stream = if (code == 200) c.inputStream else c.errorStream
-                val txt = stream.bufferedReader().use { it.readText() }
-                if (code == 200) {
-                    val reply = JSONObject(txt)
-                        .getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("message").getString("content").trim()
-                    handler.post { speak(reply) }
-                } else {
-                    handler.post { speak("Groq gagal $code. Cek key atau kuota ya Sir.") }
+            // Model + cadangan (llama pensiun Agu 2026 -> 404, coba berikutnya).
+            val models = listOf(
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b"
+            )
+            var done = false
+            var lastCode = -1
+            for (model in models) {
+                if (done) break
+                try {
+                    val url =
+                        java.net.URL("https://api.groq.com/openai/v1/chat/completions")
+                    val c = url.openConnection() as javax.net.ssl.HttpsURLConnection
+                    c.requestMethod = "POST"
+                    c.connectTimeout = 20000
+                    c.readTimeout = 20000
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json")
+                    c.setRequestProperty("Authorization", "Bearer $key")
+                    val sys = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
+                        "Bahasa Indonesia campur Inggris, singkat maks 2 kalimat, panggil user Sir."
+                    val body = JSONObject()
+                        .put("model", model)
+                        .put("temperature", 0.7)
+                        .put("max_tokens", 250)
+                        .put(
+                            "messages", org.json.JSONArray()
+                                .put(JSONObject().put("role", "system").put("content", sys))
+                                .put(JSONObject().put("role", "user").put("content", userText))
+                        ).toString()
+                    c.outputStream.use { it.write(body.toByteArray()) }
+                    val code = c.responseCode
+                    lastCode = code
+                    val stream = if (code == 200) c.inputStream else c.errorStream
+                    val txt = stream.bufferedReader().use { it.readText() }
+                    if (code == 200) {
+                        val reply = JSONObject(txt)
+                            .getJSONArray("choices").getJSONObject(0)
+                            .getJSONObject("message").getString("content").trim()
+                        done = true
+                        handler.post { speak(reply) }
+                    } else if (code == 401) {
+                        done = true
+                        handler.post { speak("API key salah Sir. Buat baru ya Sir.") }
+                    }
+                    // 404 = model pensiun -> lanjut ke cadangan. Selain itu berhenti.
+                    else if (code != 404) {
+                        done = true
+                        handler.post { speak("Groq gagal $code. Cek kuota ya Sir.") }
+                    }
+                } catch (e: Exception) {
+                    lastCode = -2
                 }
+            }
+            if (!done) {
+                handler.post { speak("Semua model gagal ($lastCode). Cek internet ya Sir.") }
+            }
+        }.start()
+    }
+}
             } catch (e: Exception) {
                 handler.post { speak("Offline Sir. Cek internet.") }
             }

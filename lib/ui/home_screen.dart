@@ -707,7 +707,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       children: [
                         avatar,
                         const SizedBox(height: 4),
-                        const Text('Preview',
+                        Text(
+                          titleCtrl.text.trim().isEmpty
+                              ? 'jarvis'
+                              : titleCtrl.text.trim(),
+                          style: TextStyle(color: c, fontSize: 13),
+                        ),
+                        const Text('Preview persis popup',
                             style: TextStyle(
                                 color: Colors.white54, fontSize: 11)),
                       ],
@@ -774,9 +780,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 TextField(
                   controller: titleCtrl,
                   maxLength: 30,
+                  onChanged: (_) {
+                    try {
+                      setD(() {});
+                    } catch (_) {}
+                  },
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
-                    hintText: 'JARVIS standby...',
+                    hintText: 'jarvis',
                     hintStyle: TextStyle(color: Colors.white30),
                     enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(color: Colors.cyanAccent)),

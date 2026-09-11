@@ -65,10 +65,19 @@ const Map<String, String> appMap = {
 ParsedCommand parseLocalCommand(String rawText) {
   final t = rawText.toLowerCase().trim();
 
-  // --- BUKA APLIKASI: "buka whatsapp", "open youtube", "tolong bukain ig" ---
-  if (t.contains('buka') || t.startsWith('open') || t.contains('jalankan')) {
+  // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "tolong bukain ig" ---
+  // (layar/senter/lampu dikecualikan -> ditangani blok khusus di bawah)
+  if ((t.contains('buka') ||
+          t.startsWith('open') ||
+          t.contains('jalankan') ||
+          t.contains('nyalain')) &&
+      !t.contains('layar') &&
+      !t.contains('senter') &&
+      !t.contains('lampu')) {
     String target = t
-        .replaceAll(RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan)'), '')
+        .replaceAll(
+            RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain)'),
+            '')
         .trim();
     // normalisasi "wasap" typo umum STT
     if (target.contains('wasap')) target = 'whatsapp';
@@ -115,7 +124,12 @@ ParsedCommand parseLocalCommand(String rawText) {
   // PIN/fingerprint tetap manual (blokir keamanan Android).
   if (t.contains('nyalakan layar') ||
       t.contains('nyalakan hp') ||
+      t.contains('nyalakan hape') ||
+      t.contains('nyalain layar') ||
+      t.contains('nyalain hp') ||
+      t.contains('nyalain hape') ||
       t.contains('hidupkan layar') ||
+      t.contains('hidupkan hp') ||
       t.contains('bangun') ||
       t.contains('wake up')) {
     return ParsedCommand(
@@ -304,12 +318,12 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- KUNCI / MATIKAN LAYAR ---
-  if ((t.contains('kunci') && t.contains('layar')) ||
-      t.contains('matikan layar') ||
-      t.contains('matikan hp') ||
-      t.contains('kunci hp') ||
-      t.contains('lock')) {
+  // --- KUNCI / MATIKAN LAYAR (senter/lampu dikecualikan) ---
+  if (((t.contains('kunci') || t.contains('matiin') || t.contains('matikan')) &&
+          (t.contains('layar') || t.contains('hp') || t.contains('hape'))) ||
+      t.contains('lock')) &&
+      !t.contains('senter') &&
+      !t.contains('lampu')) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Mengunci layar sekarang, Sir.',

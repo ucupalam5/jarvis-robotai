@@ -2,13 +2,21 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// Otak AI pakai Groq (gratis). Daftar key di https://console.groq.com
-/// Model default: llama-3.3-70b-versatile (cepat + pintar, gratis).
+/// Model: gpt-oss-120b (utama) + cadangan otomatis bila 404.
 class GroqService {
   GroqService(this.apiKey);
 
   String apiKey;
   static const String _url = 'https://api.groq.com/openai/v1/chat/completions';
-  static const String model = 'llama-3.3-70b-versatile';
+
+  /// Model utama + cadangan. llama-3.3-70b-versatile PENSIUN 16 Agu 2026
+  /// (semua request 404) -> diganti gpt-oss dengan fallback otomatis.
+  /// Urutan: pintar dulu (120b), kalau 404/tidak ada -> yang cepat (20b).
+  static const List<String> models = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.6-27b',
+  ];
 
   static const String systemPrompt = '''
 Kamu adalah JARVIS, asisten RobotAI pribadi ala Iron Man.
@@ -45,37 +53,46 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
     if (apiKey.isEmpty) {
       return 'Sir, Groq API key belum dipasang. Masukkan di Settings ya Sir.';
     }
-    try {
-      final messages = <Map<String, String>>[
-        {'role': 'system', 'content': systemPrompt},
-        ...history.takeLast(10),
-        {'role': 'user', 'content': userText},
-      ];
-      final res = await http
-          .post(
-            Uri.parse(_url),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $apiKey',
-            },
-            body: jsonEncode({
-              'model': model,
-              'messages': messages,
-              'temperature': 0.7,
-              'max_tokens': 500,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        return (data['choices'][0]['message']['content'] as String).trim();
-      } else {
-        return 'Sir, koneksi ke Groq gagal (${res.statusCode}). Cek API key / kuota gratisnya ya Sir.';
+    final messages = <Map<String, String>>[
+      {'role': 'system', 'content': systemPrompt},
+      ...history.takeLast(10),
+      {'role': 'user', 'content': userText},
+    ];
+    String lastErr = '';
+    for (final m in models) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse(_url),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $apiKey',
+              },
+              body: jsonEncode({
+                'model': m,
+                'messages': messages,
+                'temperature': 0.7,
+                'max_tokens': 300,
+              }),
+            )
+            .timeout(const Duration(seconds: 25));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          return (data['choices'][0]['message']['content'] as String).trim();
+        }
+        if (res.statusCode == 401) {
+          return 'Sir, API key salah/expired (401). Buat baru di console.groq.com ya Sir.';
+        }
+        // 404 = model pensiun/tidak ada -> coba model cadangan berikutnya.
+        lastErr = '${res.statusCode}';
+        if (res.statusCode != 404) {
+          return 'Sir, Groq jawab ${res.statusCode}. Cek kuota gratisnya ya Sir.';
+        }
+      } catch (e) {
+        lastErr = '$e';
       }
-    } catch (e) {
-      return 'Sir, saya offline nih. Cek internet ya Sir. Error: $e';
     }
+    return 'Sir, semua model Groq gagal ($lastErr). Cek internet / key / kuota ya Sir.';
   }
 }
 
