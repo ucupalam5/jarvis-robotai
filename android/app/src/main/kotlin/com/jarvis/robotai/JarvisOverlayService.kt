@@ -675,9 +675,3 @@ class JarvisOverlayService : Service() {
         }.start()
     }
 }
-            } catch (e: Exception) {
-                handler.post { speak("Offline Sir. Cek internet.") }
-            }
-        }.start()
-    }
-}
