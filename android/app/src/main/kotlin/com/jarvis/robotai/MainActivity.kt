@@ -220,9 +220,11 @@ class MainActivity : FlutterActivity() {
                         val id = (call.argument<Number>("id")?.toLong()) ?: 0L
                         result.success(cancelReminder(id))
                     }
+                    // --- Device Admin: cek + minta sekali tap ---
+                    "adminCheck" -> result.success(adminStatus())
+                    "adminRequest" -> result.success(adminRequest())
                     // --- Screenshot layar (via Accessibility, tanpa dialog) ---
-                    "screenshot" -> {
-                        Thread {
+                    "screenshot" -> {                        Thread {
                             try {
                                 val latch = java.util.concurrent.CountDownLatch(1)
                                 var out = "ERR:waktu habis"
@@ -516,6 +518,36 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal membuka pengaturan: ${e.message}"
+        }
+    }
+
+    /** Status Device Admin (syarat kunci layar via suara). */
+    private fun adminStatus(): String {
+        return try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(this, AdminReceiver::class.java)
+            if (dpm.isAdminActive(admin)) "OK"
+            else "BELUM: tap untuk aktifkan ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek Device Admin: ${e.message}"
+        }
+    }
+
+    /** Langsung lompat ke halaman aktifkan Device Admin (1 tap). */
+    private fun adminRequest(): String {
+        return try {
+            val admin = ComponentName(this, AdminReceiver::class.java)
+            val i = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+            i.putExtra(
+                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Aktifkan agar Jarvis bisa mengunci / mematikan layar via suara, Sir."
+            )
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal buka halaman admin: ${e.message}"
         }
     }
 

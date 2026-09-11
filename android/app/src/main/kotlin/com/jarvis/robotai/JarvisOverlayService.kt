@@ -464,6 +464,16 @@ class JarvisOverlayService : Service() {
                         tts?.language =
                             if (tts?.isLanguageAvailable(id) ?: 0 >= 0) id
                             else Locale.getDefault()
+                        // DUCKING: suara Jarvis hanya mengecilkan video/musik,
+                        // bukan me-pause (USAGE_ASSISTANT, API 21+).
+                        if (Build.VERSION.SDK_INT >= 21) {
+                            tts?.setAudioAttributes(
+                                android.media.AudioAttributes.Builder()
+                                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                    .build()
+                            )
+                        }
                     } catch (_: Exception) {}
                 }
             }
@@ -1202,7 +1212,8 @@ class JarvisOverlayService : Service() {
                     c.setRequestProperty("Content-Type", "application/json")
                     c.setRequestProperty("Authorization", "Bearer $key")
                     val sys = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
-                        "Bahasa Indonesia campur Inggris, singkat maks 2 kalimat, panggil user Sir."
+                        "WAJIB SELALU jawab Bahasa Indonesia (campur Inggris santai). " +
+                        "JANGAN PERNAH jawab full Inggris. Singkat maks 2 kalimat, panggil user Sir."
                     val body = JSONObject()
                         .put("model", model)
                         .put("temperature", 0.7)

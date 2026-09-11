@@ -72,6 +72,10 @@ class AppController {
   static Future<String> downloadUpdate(String url) =>
       _invoke('downloadUpdate', {'url': url});
 
+  // --- Device Admin 1-tap (syarat kunci layar) ---
+  static Future<String> adminCheck() => _invoke('adminCheck');
+  static Future<String> adminRequest() => _invoke('adminRequest');
+
   // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
   static Future<String> requestContacts() => _invoke('requestContacts');
   static Future<String> resolveContact(String name) =>

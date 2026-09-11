@@ -615,18 +615,19 @@ ParsedCommand parseLocalCommand(String rawText) {
       action: () async {
         await AppController.ringerMode('normal');
         await AppController.openApp('com.google.android.gm');
-        return 'SAY:Mode kerja, Sir. Suara normal + Gmail dibuka.';
+        return 'SILENT:0|Mode kerja, Sir. Suara normal + Gmail dibuka.';
       },
     );
   }
-  if (has(['mode nonton', 'mode film'])) {
+  if (has(['mode nonton', 'mode film', 'mode bioskop'])) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Mode nonton, Sir.',
       action: () async {
         await AppController.ringerMode('vibrate');
         await AppController.openApp('com.google.android.youtube');
-        return 'SAY:Mode nonton, Sir. Getar + YouTube dibuka.';
+        // SILENT:1 = Jarvis ikut bisu agar video tidak keganggu.
+        return 'SILENT:1|Mode nonton, Sir. Saya diam sampai mode suara dinyalakan.';
       },
     );
   }

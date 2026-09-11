@@ -10,9 +10,17 @@ class VoiceService {
   bool isListening = false;
   bool sttReady = false;
   bool ttsReady = false;
+  /// true bila ada voice Indonesia terinstall (kalau tidak, Jarvis
+  /// terpaksa bersuara Inggris -> user wajib install paket suara).
+  bool ttsIndonesian = false;
 
   Future<void> initTts() async {
     try {
+      // Kunci engine Google (paling lengkap paket Indonesianya).
+      try {
+        await tts.setEngine('com.google.android.tts')
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
       // Paksa suara Indonesia: cari voice 'id' yang terinstall lalu kunci.
       try {
         await tts.setLanguage('id-ID').timeout(const Duration(seconds: 5));
@@ -24,6 +32,7 @@ class VoiceService {
               if (loc.startsWith('id')) {
                 await tts.setVoice(
                     {'name': v['name'], 'locale': v['locale']});
+                ttsIndonesian = true;
                 break;
               }
             }

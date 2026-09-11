@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _apiCtrl = TextEditingController();
   final _scroll = ScrollController();
   String _acc = '...';
+  String _admin = '...';
   String _popIcon = OverlayService.defaultIcon;
   String _popColor = OverlayService.defaultColor;
   final _popTitleCtrl = TextEditingController();
@@ -86,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _consumeAutolisten();
       _refreshAcc(silent: true);
+      _refreshAdmin(silent: true);
     }
   }
 
@@ -229,10 +231,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _popAuto = pop['auto'] == '1';
     setState(() {});
     _refreshAcc(silent: true);
+    _refreshAdmin(silent: true);
     _checkKey(silent: true);
     _requestStartupPermissions();
     _cacheApps();
     _isOnline();
+    _warnTtsOnce();
     // Cek update otomatis sekali tiap buka (tanpa ganggu).
     Future.delayed(const Duration(seconds: 5), () {
       if (mounted) _checkUpdate(silent: true);
@@ -287,6 +291,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  /// Sekali saja: bila HP tak punya suara Indonesia, Jarvis terpaksa
+  /// bersuara Inggris. Arahkan user install paket suara (gratis).
+  Future<void> _warnTtsOnce() async {
+    try {
+      if (widget.voice.ttsIndonesian) return;
+      final sp = await SharedPreferences.getInstance();
+      if (sp.getBool('tts_warned') ?? false) return;
+      await sp.setBool('tts_warned', true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 8),
+        content: const Text(
+            'Suara Indonesia belum ada di HP, Sir — Jarvis terpaksa Inggris. Install gratis: ucapkan "setting suara" > Text-to-speech > Install voice data > Indonesia.'),
+      ));
+    } catch (_) {}
+  }
+
   /// Validasi API key ke server Groq. Hasil tampil sebagai banner.
   Future<void> _checkKey({bool silent = false}) async {
     final k = widget.groq.apiKey;
@@ -318,6 +339,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!silent && mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Aksesibilitas: $s')));
+    }
+  }
+
+  /// Status Device Admin 1-tap (syarat "kunci/mati layar" via suara).
+  Future<void> _refreshAdmin({bool silent = false}) async {
+    String s;
+    try {
+      s = await AppController.adminCheck();
+    } catch (e) {
+      s = 'Gagal cek: $e';
+    }
+    if (mounted) setState(() => _admin = s);
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Device Admin: $s')));
     }
   }
 
@@ -357,6 +393,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return ans;
     }
     if (res.startsWith('SAY:')) return res.substring('SAY:'.length);
+    // SILENT:1|teks = aktifkan mode bisu + pakai teks sebagai balasan.
+    if (res.startsWith('SILENT:')) {
+      final rest = res.substring('SILENT:'.length);
+      final bar = rest.indexOf('|');
+      final on = bar > 0 && rest.substring(0, bar) == '1';
+      final msg = bar >= 0 ? rest.substring(bar + 1) : rest;
+      if (mounted) setState(() => _silent = on);
+      return msg;
+    }
     if (res.startsWith('BATERAI_REPLY:')) {
       return res.substring('BATERAI_REPLY:'.length);
     }
@@ -890,6 +935,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _acc == 'OK'
                     ? '● Otomatisasi ON — tap untuk pengaturan'
                     : '● Otomatisasi: $_acc — TAP UNTUK AKTIFKAN',
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Device Admin 1-tap (syarat kunci/mati layar). Tap = buka halaman.
+          GestureDetector(
+            onTap: () async {
+              await AppController.adminRequest();
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) _refreshAdmin();
+              });
+            },
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _admin == 'OK'
+                    ? Colors.green.withOpacity(0.15)
+                    : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: _admin == 'OK'
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent),
+              ),
+              child: Text(
+                _admin == 'OK'
+                    ? '● Device Admin AKTIF'
+                    : '● Device Admin: $_admin — TAP UNTUK AKTIFKAN',
                 style:
                     const TextStyle(color: Colors.white70, fontSize: 11),
                 textAlign: TextAlign.center,
