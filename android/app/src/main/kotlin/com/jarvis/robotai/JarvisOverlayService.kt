@@ -774,7 +774,8 @@ class JarvisOverlayService : Service() {
         } catch (_: Exception) {}
     }
 
-    /** Kalkulator mini Indonesia. Return hasil format koma / null bila gagal. */
+    /** Kalkulator mini Indonesia (dua-stack, tanpa rekursi).
+     * Return hasil format koma / null bila gagal. */
     private fun calcId(s: String): String? {
         return try {
             var e = s.replaceFirst(Regex("^(berapa|hitung)\\s+"), "")
@@ -792,40 +793,56 @@ class JarvisOverlayService : Service() {
             if (!e.any { it.isDigit() }) return null
             val toks = Regex("\\d+\\.?\\d*|[+\\-*/()]")
                 .findAll(e.replace(" ", "")).map { it.value }.toList()
-            var pos = 0
-            fun expr(): Double {
-                var v = term()
-                while (pos < toks.size && (toks[pos] == "+" || toks[pos] == "-")) {
-                    val op = toks[pos++]
-                    val r = term()
-                    v = if (op == "+") v + r else v - r
+            // Tangani minus unary: "-5" -> "0-5", "(-3" -> "(0-3".
+            val fixed = ArrayList<String>()
+            for (i in toks.indices) {
+                val tk = toks[i]
+                if (tk == "-" && (i == 0 || toks[i - 1] in listOf("+", "-", "*", "/", "("))) {
+                    fixed.add("0")
                 }
-                return v
+                fixed.add(tk)
             }
-            fun term(): Double {
-                var v = factor()
-                while (pos < toks.size && (toks[pos] == "*" || toks[pos] == "/")) {
-                    val op = toks[pos++]
-                    val r = factor()
-                    v = if (op == "*") v * r else v / r
-                }
-                return v
+            val prec = mapOf("+" to 1, "-" to 1, "*" to 2, "/" to 2)
+            val vals = ArrayDeque<Double>()
+            val ops = ArrayDeque<String>()
+            fun apply() {
+                val op = ops.removeLast()
+                val r = vals.removeLast()
+                val l = vals.removeLast()
+                vals.addLast(
+                    when (op) {
+                        "+" -> l + r
+                        "-" -> l - r
+                        "*" -> l * r
+                        else -> l / r
+                    }
+                )
             }
-            fun factor(): Double {
-                if (pos < toks.size && toks[pos] == "-") {
-                    pos++
-                    return -factor()
+            for (tk in fixed) {
+                when {
+                    tk.toDoubleOrNull() != null -> vals.addLast(tk.toDouble())
+                    tk == "(" -> ops.addLast(tk)
+                    tk == ")" -> {
+                        while (ops.isNotEmpty() && ops.last() != "(") apply()
+                        if (ops.isEmpty()) return null
+                        ops.removeLast()
+                    }
+                    tk in prec -> {
+                        while (ops.isNotEmpty() && ops.last() != "(" &&
+                            prec[ops.last()]!! >= prec[tk]!!
+                        ) apply()
+                        ops.addLast(tk)
+                    }
+                    else -> return null
                 }
-                if (pos < toks.size && toks[pos] == "(") {
-                    pos++
-                    val v = expr()
-                    if (pos < toks.size && toks[pos] == ")") pos++
-                    return v
-                }
-                return toks[pos++].toDouble()
             }
-            val v = expr()
-            if (pos != toks.size || v.isInfinite() || v.isNaN()) return null
+            while (ops.isNotEmpty()) {
+                if (ops.last() == "(") return null
+                apply()
+            }
+            if (vals.size != 1) return null
+            val v = vals.last()
+            if (v.isInfinite() || v.isNaN()) return null
             if (v == kotlin.math.floor(v)) v.toLong().toString()
             else "%.2f".format(v).replace(".", ",")
         } catch (_: Exception) {
