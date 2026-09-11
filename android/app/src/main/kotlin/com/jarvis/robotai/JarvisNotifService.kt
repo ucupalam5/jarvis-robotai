@@ -6,7 +6,8 @@ import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import androidx.core.app.RemoteInput
+import android.app.RemoteInput
+import android.os.Bundle
 
 /**
  * Telinga Jarvis: dengar notifikasi WA/Telegram/SMS/Email masuk.
@@ -114,8 +115,8 @@ class JarvisNotifService : NotificationListenerService() {
             val sp = getSharedPreferences(
                 "FlutterSharedPreferences", MODE_PRIVATE
             )
-            val auto = sp.getBoolean("notif_read_auto")
-                ?: sp.getBoolean("flutter.notif_read_auto") ?: false
+            val auto = sp.getBoolean("notif_read_auto", false) ||
+                sp.getBoolean("flutter.notif_read_auto", false)
             if (auto) {
                 val app = NotifStore.appName(sbn.packageName)
                 val short = if (text.length > 200) text.take(200) + "…" else text
@@ -152,7 +153,7 @@ class JarvisNotifService : NotificationListenerService() {
         try {
             ensureTts()
             tts?.speak(
-                text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "notif"
+                text, android.speech.tts.TextToSpeech.QUEUE_ADD, Bundle(), "notif"
             )
         } catch (_: Exception) {}
     }

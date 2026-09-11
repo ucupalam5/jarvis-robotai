@@ -29,8 +29,8 @@ class SmsReceiver : BroadcastReceiver() {
             val sp = ctx.getSharedPreferences(
                 "FlutterSharedPreferences", Context.MODE_PRIVATE
             )
-            val code = ((sp.getString("sos_code")
-                ?: sp.getString("flutter.sos_code")
+            val code = ((sp.getString("sos_code", "JARVIS123")
+                ?: sp.getString("flutter.sos_code", "JARVIS123")
                 ?: "JARVIS123").trim().uppercase())
             if (code.length < 4) return
             @Suppress("DEPRECATION")
@@ -39,7 +39,12 @@ class SmsReceiver : BroadcastReceiver() {
             var from = ""
             val body = StringBuilder()
             for (p in pdus) {
-                val m = SmsMessage.createFromPdu(p as ByteArray, format)
+                @Suppress("DEPRECATION")
+                val m = if (format != null) {
+                    SmsMessage.createFromPdu(p as ByteArray, format)
+                } else {
+                    SmsMessage.createFromPdu(p as ByteArray)
+                }
                 if (from.isEmpty()) from = m.originatingAddress ?: ""
                 body.append(m.messageBody)
             }
