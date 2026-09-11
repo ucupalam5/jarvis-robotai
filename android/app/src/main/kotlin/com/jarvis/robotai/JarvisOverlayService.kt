@@ -83,11 +83,13 @@ class JarvisOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // NOT_STICKY: kalau user mematikan popup, sistem tidak boleh
+        // menghidupkannya lagi sendiri.
         rebuildOverlay()
         val wantAuto = prefs().getBoolean("popup_autolisten", false) ||
             prefs().getBoolean("flutter.popup_autolisten", false)
         if (wantAuto) startAutoListen() else stopAutoListen()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -475,13 +477,14 @@ class JarvisOverlayService : Service() {
     private val appMap = mapOf(
         "whatsapp" to "com.whatsapp", "wa" to "com.whatsapp",
         "youtube" to "com.google.android.youtube", "yt" to "com.google.android.youtube",
+        "yutub" to "com.google.android.youtube",
         "instagram" to "com.instagram.android", "ig" to "com.instagram.android",
         "tiktok" to "com.zhiliaoapp.musically",
-        "telegram" to "org.telegram.messenger",
+        "telegram" to "org.telegram.messenger", "tele" to "org.telegram.messenger",
         "spotify" to "com.spotify.music",
-        "chrome" to "com.android.chrome",
+        "chrome" to "com.android.chrome", "krom" to "com.android.chrome",
         "kamera" to "com.android.camera", "camera" to "com.android.camera",
-        "maps" to "com.google.android.apps.maps",
+        "maps" to "com.google.android.apps.maps", "gmaps" to "com.google.android.apps.maps",
         "gmail" to "com.google.android.gm",
         "telepon" to "com.android.dialer",
         "pesan" to "com.google.android.apps.messaging",
@@ -490,7 +493,9 @@ class JarvisOverlayService : Service() {
         "jam" to "com.google.android.deskclock",
         "alarm" to "com.google.android.deskclock",
         "pengaturan" to "com.android.settings",
-        "setelan" to "com.android.settings"
+        "setelan" to "com.android.settings",
+        "shopee" to "com.shopee.id", "sopi" to "com.shopee.id", "shopi" to "com.shopee.id",
+        "tokopedia" to "com.tokopedia.tkpd", "toped" to "com.tokopedia.tkpd"
     )
 
     private fun handleVoiceCommand(raw: String) {
@@ -527,6 +532,14 @@ class JarvisOverlayService : Service() {
                             target = k
                             break
                         }
+                    }
+                }
+                if (pkg == null) {
+                    // Fallback cerdas: cari app terdekat di HP.
+                    val best = AppFinder.findBest(packageManager, target)
+                    if (best != null) {
+                        pkg = best.second
+                        target = best.first
                     }
                 }
                 if (pkg != null) {

@@ -3,6 +3,7 @@ package com.jarvis.robotai
 import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.DownloadManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -15,6 +16,7 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.AlarmClock
 import android.provider.Settings
@@ -142,6 +144,16 @@ class MainActivity : FlutterActivity() {
                         val code = call.argument<Int>("code") ?: 85
                         result.success(mediaKey(code))
                     }
+                    // --- Ganti ikon aplikasi (tanpa install ulang) ---
+                    "setIcon" -> {
+                        val v = call.argument<String>("variant") ?: "cyan"
+                        result.success(setIcon(v))
+                    }
+                    // --- Auto-update: unduh APK lalu buka installer ---
+                    "downloadUpdate" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        result.success(downloadUpdate(url))
+                    }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
                     "accOpenSettings" -> {
@@ -174,30 +186,19 @@ class MainActivity : FlutterActivity() {
     private fun openApp(keyword: String): String {
         return try {
             val pm = packageManager
-            // 1) langsung sebagai package name
-            var intent = pm.getLaunchIntentForPackage(keyword)
-            // 2) cari aplikasi yang mengandung keyword (longgar: abaikan spasi).
-            if (intent == null) {
-                val flat = keyword.replace(" ", "").lowercase()
-                val apps = pm.getInstalledApplications(0)
-                val found = apps.firstOrNull {
-                    val pkg = it.packageName
-                    val label = pm.getApplicationLabel(it)?.toString() ?: ""
-                    pkg.contains(keyword, ignoreCase = true) ||
-                    label.contains(keyword, ignoreCase = true) ||
-                    (flat.isNotEmpty() &&
-                        (pkg.replace(" ", "").contains(flat, ignoreCase = true) ||
-                            label.replace(" ", "").contains(flat, ignoreCase = true)))
+            val found = AppFinder.findBest(pm, keyword)
+            if (found != null) {
+                val intent = pm.getLaunchIntentForPackage(found.second)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                    // Tandai bila yang dibuka hasil tebakan cerdas.
+                    val exact = found.first.equals(keyword, ignoreCase = true) ||
+                        found.second.equals(keyword, ignoreCase = true)
+                    return if (exact) "OK" else "OK_MAKSUD:${found.first}"
                 }
-                if (found != null) intent = pm.getLaunchIntentForPackage(found.packageName)
             }
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                "OK"
-            } else {
-                "Aplikasi '$keyword' tidak ditemukan, Sir."
-            }
+            "Aplikasi '$keyword' tidak ditemukan, Sir."
         } catch (e: Exception) {
             "Gagal membuka: ${e.message}"
         }
@@ -517,6 +518,78 @@ class MainActivity : FlutterActivity() {
         ActivityCompat.requestPermissions(
             this, arrayOf(Manifest.permission.CAMERA), CAM_REQ
         )
+    }
+
+    /** Ganti ikon launcher via activity-alias (efek setelah launcher refresh). */
+    private fun setIcon(variant: String): String {
+        return try {
+            val pm = packageManager
+            val all = mapOf(
+                "cyan" to ComponentName(this, MainActivity::class.java),
+                "green" to ComponentName(this, "com.jarvis.robotai.LauncherGreen"),
+                "orange" to ComponentName(this, "com.jarvis.robotai.LauncherOrange")
+            )
+            val want = all[variant] ?: all["cyan"]!!
+            for ((_, comp) in all) {
+                pm.setComponentEnabledSetting(
+                    comp,
+                    if (comp == want)
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    else
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            }
+            "OK"
+        } catch (e: Exception) {
+            "Gagal ganti ikon: ${e.message}"
+        }
+    }
+
+    /** Auto-update: unduh APK GitHub Release, installer terbuka otomatis. */
+    private fun downloadUpdate(url: String): String {
+        if (url.isBlank()) return "URL update kosong."
+        return try {
+            if (Build.VERSION.SDK_INT >= 26 &&
+                !packageManager.canRequestPackageInstalls()
+            ) {
+                try {
+                    val i = Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:$packageName")
+                    )
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                } catch (_: Exception) {}
+                return "NEED_INSTALL_PERM:Izinkan 'Install unknown apps' untuk Jarvis, lalu tap Update lagi ya Sir."
+            }
+            try {
+                java.io.File(
+                    getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+                    "jarvis-update.apk"
+                ).delete()
+            } catch (_: Exception) {}
+            val req = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle("Update Jarvis")
+                setDescription("Mengunduh APK baru...")
+                setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                )
+                setDestinationInExternalFilesDir(
+                    this@MainActivity,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "jarvis-update.apk"
+                )
+                setMimeType("application/vnd.android.package-archive")
+            }
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val id = dm.enqueue(req)
+            getSharedPreferences("jarvis_upd", Context.MODE_PRIVATE)
+                .edit().putLong("last_download", id).apply()
+            "OK:Mengunduh update, Sir. Installer terbuka otomatis setelah selesai."
+        } catch (e: Exception) {
+            "Gagal unduh update: ${e.message}"
+        }
     }
 
     /** Daftar app ber-launcher "label|package" per baris, urut A-Z. */

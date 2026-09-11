@@ -17,7 +17,9 @@ const Map<String, String> appMap = {
   'wa': 'com.whatsapp',
   'youtube': 'com.google.android.youtube',
   'yt': 'com.google.android.youtube',
+  'yutub': 'com.google.android.youtube',
   'chrome': 'com.android.chrome',
+  'krom': 'com.android.chrome',
   'browser': 'com.android.chrome',
   'kamera': 'com.android.camera',
   'camera': 'com.android.camera',
@@ -25,6 +27,7 @@ const Map<String, String> appMap = {
   'foto': 'com.google.android.apps.photos',
   'maps': 'com.google.android.apps.maps',
   'map': 'com.google.android.apps.maps',
+  'gmaps': 'com.google.android.apps.maps',
   'gmail': 'com.google.android.gm',
   'email': 'com.google.android.gm',
   'telepon': 'com.android.dialer',
@@ -43,8 +46,12 @@ const Map<String, String> appMap = {
   'facebook': 'com.facebook.katana',
   'fb': 'com.facebook.katana',
   'telegram': 'org.telegram.messenger',
+  'tele': 'org.telegram.messenger',
   'shopee': 'com.shopee.id',
+  'sopi': 'com.shopee.id',
+  'shopi': 'com.shopee.id',
   'tokopedia': 'com.tokopedia.tkpd',
+  'toped': 'com.tokopedia.tkpd',
   'dana': 'id.dana',
   'ovo': 'ovo.id',
   'gopay': 'com.gojek.gopay',
@@ -52,8 +59,10 @@ const Map<String, String> appMap = {
   'grab': 'com.grabtaxi.passenger',
   'mobile legend': 'com.mobile.legends',
   'ml': 'com.mobile.legends',
+  'mlbb': 'com.mobile.legends',
   'free fire': 'com.dts.freefireth',
   'ff': 'com.dts.freefireth',
+  'epep': 'com.dts.freefireth',
   'pubg': 'com.tencent.ig',
   'settings': 'com.android.settings',
   'pengaturan': 'com.android.settings',
@@ -108,7 +117,14 @@ ParsedCommand parseLocalCommand(String rawText) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Siap Sir, membuka $label.',
-      action: () => AppController.openApp(kw),
+      action: () async {
+        final r = await AppController.openApp(kw);
+        // Native menemukan yang mirip -> ucapkan namanya dengan benar.
+        if (r.startsWith('OK_MAKSUD:')) {
+          return 'SAY:Maksudnya ${r.substring('OK_MAKSUD:'.length)} ya Sir. Membuka.';
+        }
+        return r;
+      },
     );
   }
 

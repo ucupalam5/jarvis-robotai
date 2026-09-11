@@ -59,6 +59,14 @@ class AppController {
   static Future<String> mediaKey(int code) =>
       _invoke('mediaKey', {'code': code});
 
+  // --- Ikon aplikasi (activity-alias, tanpa install ulang) ---
+  static Future<String> setIcon(String variant) =>
+      _invoke('setIcon', {'variant': variant});
+
+  // --- Auto-update GitHub Release ---
+  static Future<String> downloadUpdate(String url) =>
+      _invoke('downloadUpdate', {'url': url});
+
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
   static Future<String> accOpenSettings() => _invoke('accOpenSettings');

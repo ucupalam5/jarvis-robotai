@@ -6,6 +6,7 @@ import '../core/app_controller.dart';
 import '../core/command_parser.dart';
 import '../core/groq_service.dart';
 import '../core/overlay_service.dart';
+import '../core/update_service.dart';
 import '../core/voice_service.dart';
 import 'jarvis_orb.dart';
 
@@ -43,6 +44,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _handsfree = false;
   bool _silent = false;
   String _keyCheck = ''; // '' | 'ok' | 'bad:pesan'
+  String _loadingTheme = 'cyan';
+  String _appIcon = 'cyan';
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -207,6 +210,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final k = sp.getString('groq_key') ?? '';
     widget.groq.apiKey = k;
     _apiCtrl.text = k;
+    _loadingTheme = sp.getString('loading_theme') ?? 'cyan';
+    _appIcon = sp.getString('app_icon') ?? 'cyan';
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
@@ -219,10 +224,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _requestStartupPermissions();
     _cacheApps();
     _isOnline();
+    // Cek update otomatis sekali tiap buka (tanpa ganggu).
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) _checkUpdate(silent: true);
+    });
     // Cek juga saat pertama buka (misal dibuka dari tap popup).
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) _consumeAutolisten();
     });
+  }
+
+  /// Cek update GitHub Release. silent=true: hanya dialog bila ada update.
+  Future<void> _checkUpdate({bool silent = false}) async {
+    try {
+      final (has, tag, url, notes) = await UpdateService.check();
+      if (!mounted) return;
+      if (!has) {
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(notes.isEmpty ? 'Dicek.' : notes)));
+        }
+        return;
+      }
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF0A1628),
+          title: Text('Update $tag tersedia',
+              style: const TextStyle(color: Colors.cyanAccent)),
+          content: Text(
+            notes.isEmpty
+                ? 'Install versi baru tanpa hapus data, Sir?'
+                : notes,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Nanti')),
+            ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  final r = await AppController.downloadUpdate(url);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(r)));
+                  }
+                },
+                child: const Text('Update')),
+          ],
+        ),
+      );
+    } catch (_) {}
   }
 
   /// Validasi API key ke server Groq. Hasil tampil sebagai banner.
@@ -864,11 +917,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _openPopupSettings() {
+  Future<void> _openPopupSettings() async {
     String selIcon = _popIcon;
     String selColor = _popColor;
     String selImage = _popImage;
     bool selAuto = _popAuto;
+    bool selEnabled = true;
+    try {
+      selEnabled = await OverlayService.isEnabled();
+    } catch (_) {}
     bool saving = false;
     int statusVer = 0;
     final titleCtrl = TextEditingController(text: _popTitleCtrl.text);
@@ -915,8 +972,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   },
                 ),
-                // Preview persis pilihan saat ini (bukti sebelum save).
-                Center(
+                // Saklar utama popup: OFF = tidak ganggu sama sekali.
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Popup aktif',
+                            style: TextStyle(
+                                color: Colors.white, fontSize: 13)),
+                      ),
+                      Switch(
+                        value: selEnabled,
+                        activeColor: Colors.cyanAccent,
+                        onChanged: (v) => setD(() => selEnabled = v),
+                      ),
+                    ],
+                  ),
+                ),
+                // Preview persis pilihan saat ini (bukti sebelum save).                Center(
                   child: Builder(builder: (_) {
                     Color c;
                     try {
@@ -1137,6 +1216,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         title: title,
                         image: selImage);
                     await OverlayService.saveAutolisten(selAuto);
+                    await OverlayService.setEnabled(selEnabled);
                     if (mounted) {
                       setState(() {
                         _popIcon = selIcon;
@@ -1181,13 +1261,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         title: title,
                         image: selImage);
                     await OverlayService.saveAutolisten(selAuto);
+                    await OverlayService.setEnabled(selEnabled);
                     // Verifikasi baca-balik: bukti nyata tersimpan.
                     final check = await OverlayService.readConfig();
+                    final enabledNow = await OverlayService.isEnabled();
                     final ok = check['icon'] == selIcon &&
                         check['color'] == selColor &&
                         check['title'] == title &&
                         check['image'] == selImage &&
-                        check['auto'] == (selAuto ? '1' : '0');
+                        check['auto'] == (selAuto ? '1' : '0') &&
+                        enabledNow == selEnabled;
                     if (mounted) {
                       setState(() {
                         _popIcon = selIcon;
@@ -1219,17 +1302,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _openSettings() {
+    String selTheme = _loadingTheme;
+    String selAppIcon = _appIcon;
+    Color themeColor(String k) {
+      switch (k) {
+        case 'green':
+          return const Color(0xFF00FF9D);
+        case 'orange':
+          return const Color(0xFFFFB300);
+        default:
+          return Colors.cyanAccent;
+      }
+    }
+
+    String themeName(String k) {
+      switch (k) {
+        case 'green':
+          return 'Matrix';
+        case 'orange':
+          return 'Senja';
+        default:
+          return 'Reaktor';
+      }
+    }
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
         backgroundColor: const Color(0xFF0A1628),
-        title: const Text('Groq API Key (gratis)',
+        title: const Text('Settings Jarvis',
             style: TextStyle(color: Colors.cyanAccent)),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '1. Buka console.groq.com\n2. Create API Key gratis\n3. Paste ke sini, Save.',
+              'Groq API (gratis):\n1. Buka console.groq.com\n2. Create API Key\n3. Paste, Save.',
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 10),
@@ -1256,19 +1366,107 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   foregroundColor: Colors.cyanAccent,
                   side: const BorderSide(color: Colors.cyanAccent)),
             ),
+            const Divider(color: Colors.white24),
+            const Text('Tampilan loading:',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: ['cyan', 'green', 'orange'].map((k) {
+                final sel = selTheme == k;
+                return GestureDetector(
+                  onTap: () => setD(() => selTheme = k),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      color: sel
+                          ? themeColor(k).withOpacity(0.25)
+                          : Colors.white10,
+                      border: Border.all(
+                          color: sel ? themeColor(k) : Colors.white24),
+                    ),
+                    child: Text(themeName(k),
+                        style: TextStyle(
+                            color:
+                                sel ? themeColor(k) : Colors.white70,
+                            fontSize: 12)),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            const Text('Ikon aplikasi (efek setelah launcher refresh):',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: ['cyan', 'green', 'orange'].map((k) {
+                final sel = selAppIcon == k;
+                return GestureDetector(
+                  onTap: () => setD(() => selAppIcon = k),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: themeColor(k),
+                      border: Border.all(
+                          color: sel ? Colors.white : Colors.transparent,
+                          width: 2),
+                    ),
+                    child: const Icon(Icons.smart_toy,
+                        color: Colors.black54, size: 24),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 4),
+            const Text('Tutup-buka app 1x untuk lihat loading baru.',
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _checkUpdate(),
+              icon: const Icon(Icons.system_update, size: 16),
+              label: const Text('Cek update aplikasi',
+                  style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent)),
+            ),
           ],
+        ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Batal')),
           ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 _saveKey();
-                Navigator.pop(context);
+                final sp = await SharedPreferences.getInstance();
+                await sp.setString('loading_theme', selTheme);
+                await sp.setString('app_icon', selAppIcon);
+                if (mounted) {
+                  setState(() {
+                    _loadingTheme = selTheme;
+                    _appIcon = selAppIcon;
+                  });
+                  final r =
+                      await AppController.setIcon(selAppIcon);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(r == 'OK'
+                            ? 'Tersimpan, Sir. Ikon launcher ikut setelah launcher refresh.'
+                            : r)));
+                  }
+                }
+                if (context.mounted) Navigator.pop(context);
               },
               child: const Text('Save')),
         ],
+      ),
       ),
     );
   }

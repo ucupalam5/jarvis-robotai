@@ -20,13 +20,31 @@ class OverlayService {
   static const String kTitle = 'popup_title';
   static const String kImage = 'popup_image'; // path file galeri, '' = ikon
   static const String kAuto = 'popup_autolisten'; // bool: dengar tanpa tap
+  static const String kEnabled = 'popup_enabled'; // bool: popup boleh tampil
 
   static const String defaultIcon = 'robot';
   static const String defaultColor = '00D4FF';
   static const String defaultTitle = 'jarvis';
 
+  static Future<bool> isEnabled() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      return sp.getBool(kEnabled) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> setEnabled(bool on) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(kEnabled, on);
+    if (!on) await hide();
+  }
+
   /// true bila popup benar-benar tampil (dicek ulang setelah jeda).
   static Future<bool> show() async {
+    if (!await isEnabled()) return false;
+    if (!await ensurePermission()) return false;
     final r = await AppController.overlayShow();
     if (r != 'OK') return false;
     await Future.delayed(const Duration(milliseconds: 1800));
@@ -53,6 +71,10 @@ class OverlayService {
   /// Simpan config + tampilkan ulang bila popup sedang aktif.
   static Future<void> pushConfig() async {
     try {
+      if (!await isEnabled()) {
+        await hide();
+        return;
+      }
       if (await AppController.overlayActive() == 'YA') {
         await AppController.overlayShow();
       }
