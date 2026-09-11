@@ -76,13 +76,26 @@ class AppController {
   static Future<String> adminCheck() => _invoke('adminCheck');
   static Future<String> adminRequest() => _invoke('adminRequest');
 
+  // --- SMS darurat + lokasi (find-my-phone) ---
+  static Future<String> requestSms() => _invoke('requestSms');
+  static Future<String> requestLoc() => _invoke('requestLoc');
+
   // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
+  static Future<String> requestLoc() => _invoke('requestLoc');
   static Future<String> requestContacts() => _invoke('requestContacts');
   static Future<String> resolveContact(String name) =>
       _invoke('resolveContact', {'name': name});
   static Future<String> openWaChat(String number, String body) =>
       _invoke('openWaChat', {'number': number, 'body': body});
 
+  // --- Notifikasi: baca + balas pesan masuk ---
+  static Future<String> notifCheck() => _invoke('notifCheck');
+  static Future<String> notifOpenSettings() => _invoke('notifOpenSettings');
+  static Future<String> notifLast() => _invoke('notifLast');
+  static Future<String> notifReply(String text, String sender) =>
+      _invoke('notifReply', {'text': text, 'sender': sender});
+  static Future<String> notifAuto(bool on) =>
+      _invoke('notifAuto', {'on': on});
   // --- Pengingat terjadwal ---
   static Future<String> setReminder(int id, int at, String text) =>
       _invoke('setReminder', {'id': id, 'at': at, 'text': text});

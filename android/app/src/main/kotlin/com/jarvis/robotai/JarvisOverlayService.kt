@@ -794,6 +794,54 @@ class JarvisOverlayService : Service() {
                 speak(jokes[(System.currentTimeMillis() % jokes.size).toInt()])
                 return
             }
+            // NOTIFIKASI: baca pesan terakhir + balas via suara.
+            if (s.startsWith("ada pesan") || s.startsWith("baca notif") ||
+                s.startsWith("notif terakhir") || s.startsWith("pesan masuk") ||
+                s.startsWith("pesan baru") || s.startsWith("cek notif")
+            ) {
+                val m = NotifStore.latest
+                if (m == null) {
+                    speak("Belum ada pesan masuk, Sir.")
+                } else {
+                    val short = if (m.text.length > 180) {
+                        m.text.take(180) + "..."
+                    } else {
+                        m.text
+                    }
+                    speak("Pesan dari ${m.sender}, Sir: $short")
+                }
+                return
+            }
+            if (s.startsWith("balas ") || s.startsWith("balas:") || s == "balas") {
+                var rest = s.replaceFirst(Regex("^balas\\s*:?\\s*"), "").trim()
+                if (rest.isEmpty()) {
+                    speak("Mau balas apa, Sir?")
+                    return
+                }
+                var sender = ""
+                var text = rest
+                val mm = Regex("^(.+?)\\s*:\\s*(.+)").find(rest)
+                if (mm != null && mm.groupValues[1].trim().length <= 30) {
+                    sender = mm.groupValues[1].trim()
+                    text = mm.groupValues[2].trim()
+                }
+                val target = if (sender.isBlank()) {
+                    null
+                } else {
+                    NotifStore.findBySender(sender)
+                }
+                if (sender.isNotBlank() && target == null) {
+                    speak("Tidak ada pesan dari $sender, Sir.")
+                    return
+                }
+                val r = NotifStore.replyTo(target, text)
+                if (r.startsWith("OK:")) {
+                    speak("Terkirim ke ${r.removePrefix("OK:")}, Sir.")
+                } else {
+                    speak(r)
+                }
+                return
+            }
             // LIHAT LAYAR: screenshot + AI vision menjelaskan.
             if (has(
                     listOf(

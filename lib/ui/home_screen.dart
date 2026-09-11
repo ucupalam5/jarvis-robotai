@@ -54,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _loadingTheme = 'cyan';
   String _appIcon = 'cyan';
   String _loadingBg = '';
+  final _sosCtrl = TextEditingController();
+  bool _autoRead = false;
+  String _notif = '...';
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -88,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _consumeAutolisten();
       _refreshAcc(silent: true);
       _refreshAdmin(silent: true);
+      _refreshNotif(silent: true);
     }
   }
 
@@ -223,6 +227,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadingTheme = sp.getString('loading_theme') ?? 'cyan';
     _appIcon = sp.getString('app_icon') ?? 'cyan';
     _loadingBg = sp.getString('loading_bg') ?? '';
+    _sosCtrl.text = sp.getString('sos_code') ?? 'JARVIS123';
+    _autoRead = sp.getBool('notif_read_auto') ?? false;
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
@@ -232,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {});
     _refreshAcc(silent: true);
     _refreshAdmin(silent: true);
+    _refreshNotif(silent: true);
     _checkKey(silent: true);
     _requestStartupPermissions();
     _cacheApps();
@@ -339,6 +346,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!silent && mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Aksesibilitas: $s')));
+    }
+  }
+
+  /// Status akses notifikasi (syarat baca/balas pesan + auto-bacakan).
+  Future<void> _refreshNotif({bool silent = false}) async {
+    String s;
+    try {
+      s = await AppController.notifCheck();
+    } catch (e) {
+      s = 'Gagal cek: $e';
+    }
+    if (mounted) setState(() => _notif = s);
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Notifikasi: $s')));
     }
   }
 
@@ -967,6 +989,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _admin == 'OK'
                     ? '● Device Admin AKTIF'
                     : '● Device Admin: $_admin — TAP UNTUK AKTIFKAN',
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Akses notifikasi (syarat baca/balas pesan). Tap = buka halaman.
+          GestureDetector(
+            onTap: () async {
+              await AppController.notifOpenSettings();
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) _refreshNotif();
+              });
+            },
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _notif == 'OK'
+                    ? Colors.green.withOpacity(0.15)
+                    : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: _notif == 'OK'
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent),
+              ),
+              child: Text(
+                _notif == 'OK'
+                    ? '● Notifikasi AKTIF — "ada pesan apa?" / "balas: ..."'
+                    : '● Notifikasi: $_notif — TAP UNTUK AKTIFKAN',
                 style:
                     const TextStyle(color: Colors.white70, fontSize: 11),
                 textAlign: TextAlign.center,
@@ -1668,6 +1722,88 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Text('✓ Background galeri aktif.',
                   style: TextStyle(
                       color: Colors.greenAccent, fontSize: 12)),
+            const Divider(color: Colors.white24),
+            const Text('Bacakan pesan otomatis:',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                      'Tiap WA/Telegram/SMS masuk langsung dibacakan.',
+                      style:
+                          TextStyle(color: Colors.white54, fontSize: 11)),
+                ),
+                Switch(
+                  value: _autoRead,
+                  activeColor: Colors.cyanAccent,
+                  onChanged: (v) async {
+                    final r = await AppController.notifAuto(v);
+                    if (r == 'OK') {
+                      final sp =
+                          await SharedPreferences.getInstance();
+                      await sp.setBool('notif_read_auto', v);
+                      if (mounted) {
+                        setState(() => _autoRead = v);
+                      }
+                    } else if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(r)));
+                    }
+                  },
+                ),
+              ],
+            ),
+            const Divider(color: Colors.white24),
+            const Text('Kode SMS darurat (find-my-phone):',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text(
+                'Dari HP lain kirim SMS: KODE (balas lokasi) / KODE RING (bunyi) / KODE LOCK (kunci). JAGA RAHASIA.',
+                style: TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _sosCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'JARVIS123',
+                hintStyle: TextStyle(color: Colors.white30),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final code = _sosCtrl.text.trim().toUpperCase();
+                if (code.length < 4) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text(
+                                'Kode minimal 4 karakter, Sir.')));
+                  }
+                  return;
+                }
+                final sp = await SharedPreferences.getInstance();
+                await sp.setString('sos_code', code);
+                final a = await AppController.requestSms();
+                final b = await AppController.requestLoc();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(a == 'OK' && b == 'OK'
+                          ? 'Kode tersimpan + izin OK, Sir.'
+                          : '$a | $b')));
+                }
+              },
+              icon: const Icon(Icons.sos, size: 16),
+              label: const Text('Simpan kode + minta izin',
+                  style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent)),
+            ),
             const SizedBox(height: 8),
             const Text('Ikon galeri di layar utama:',
                 style: TextStyle(color: Colors.white70, fontSize: 13)),

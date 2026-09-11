@@ -858,6 +858,81 @@ ParsedCommand parseLocalCommand(String rawText) {
     return ParsedCommand(handledLocally: true, reply: '$pick');
   }
 
+  // --- NOTIFIKASI: baca pesan masuk ("ada pesan apa") ---
+  if (has([
+    'ada pesan', 'baca notif', 'notif terakhir', 'pesan masuk',
+    'pesan baru', 'siapa chat', 'cek notif'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek pesan, Sir.',
+      action: () async {
+        final chk = await AppController.notifCheck();
+        if (chk != 'OK') return 'SAY:$chk';
+        final r = await AppController.notifLast();
+        if (r.startsWith('NONE:')) {
+          return 'SAY:${r.substring('NONE:'.length)}';
+        }
+        if (r.startsWith('MSG:')) {
+          final body = r.substring('MSG:'.length);
+          final sep = body.indexOf('|');
+          final sender =
+              sep >= 0 ? body.substring(0, sep) : 'seseorang';
+          final text = sep >= 0 ? body.substring(sep + 1) : body;
+          final short =
+              text.length > 180 ? '${text.substring(0, 180)}...' : text;
+          return 'SAY:Pesan dari $sender, Sir: $short';
+        }
+        return 'SAY:$r';
+      },
+    );
+  }
+
+  // --- BALAS PESAN: "balas: oke bro" / "balas mama: halo" ---
+  if (s.startsWith('balas ') || s.startsWith('balas:') || s == 'balas') {
+    var rest = s
+        .replaceFirst(RegExp(r'^balas\s*:?\s*'), '')
+        .trim();
+    if (rest.isEmpty) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Mau balas apa, Sir? Contoh: balas: oke bro.',
+      );
+    }
+    var sender = '';
+    var text = rest;
+    final m = RegExp(r'^(.+?)\s*:\s*(.+)').firstMatch(rest);
+    if (m != null && (m.group(1)!.trim().length <= 30)) {
+      sender = m.group(1)!.trim();
+      text = m.group(2)!.trim();
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membalas, Sir.',
+      action: () async {
+        final chk = await AppController.notifCheck();
+        if (chk != 'OK') return 'SAY:$chk';
+        final r = await AppController.notifReply(text, sender);
+        if (r.startsWith('OK:')) {
+          return 'SAY:${r.substring('OK:'.length)}';
+        }
+        return 'SAY:$r';
+      },
+    );
+  }
+
+  // --- BACA OTOMATIS: "baca otomatis nyala/mati" ---
+  if (has(['baca otomatis'])) {
+    final on = !(has(['mati', 'matikan', 'matiin', 'off']));
+    return ParsedCommand(
+      handledLocally: true,
+      reply: on
+          ? 'Bacakan otomatis NYALA, Sir. Tiap pesan masuk saya bacakan.'
+          : 'Bacakan otomatis mati, Sir.',
+      action: () => AppController.notifAuto(on),
+    );
+  }
+
   // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---
   return ParsedCommand(handledLocally: false, reply: '');
 }

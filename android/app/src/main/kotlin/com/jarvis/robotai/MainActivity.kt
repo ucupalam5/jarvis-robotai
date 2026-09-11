@@ -55,6 +55,10 @@ class MainActivity : FlutterActivity() {
     private val CAM_REQ = 2005
     private val CONTACT_REQ = 2006
     private var contactResult: MethodChannel.Result? = null
+    private val SMS_REQ = 2010
+    private var smsResult: MethodChannel.Result? = null
+    private val LOC_REQ = 2011
+    private var locResult: MethodChannel.Result? = null
     private val BT_REQ = 2008
     private var btResult: MethodChannel.Result? = null
     private val REC_REQ = 2009
@@ -197,6 +201,9 @@ class MainActivity : FlutterActivity() {
                         val url = call.argument<String>("url") ?: ""
                         result.success(downloadUpdate(url))
                     }
+                    // --- SMS darurat + lokasi (find-my-phone) ---
+                    "requestSms" -> requestSms(result)
+                    "requestLoc" -> requestLoc(result)
                     // --- Kontak: izin + cari nomor dari nama ---
                     "requestContacts" -> requestContacts(result)
                     "resolveContact" -> {
@@ -223,6 +230,30 @@ class MainActivity : FlutterActivity() {
                     // --- Device Admin: cek + minta sekali tap ---
                     "adminCheck" -> result.success(adminStatus())
                     "adminRequest" -> result.success(adminRequest())
+                    // --- Notifikasi: cek/izin/baca/balas/auto ---
+                    "notifCheck" -> result.success(notifStatus())
+                    "notifOpenSettings" -> {
+                        try {
+                            val i = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(i)
+                            result.success("OK")
+                        } catch (e: Exception) {
+                            result.success("Gagal buka pengaturan: ${e.message}")
+                        }
+                    }
+                    "notifLast" -> result.success(notifLast())
+                    "notifReply" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        val sender = call.argument<String>("sender") ?: ""
+                        result.success(notifReply(text, sender))
+                    }
+                    "notifAuto" -> {
+                        val on = call.argument<Boolean>("on") ?: false
+                        getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                            .edit().putBoolean("notif_read_auto", on).apply()
+                        result.success("OK")
+                    }
                     // --- Screenshot layar (via Accessibility, tanpa dialog) ---
                     "screenshot" -> {                        Thread {
                             try {
@@ -644,6 +675,39 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Senter butuh izin kamera. Buka Settings HP > Apps > JARVIS > Permissions > Camera > Allow ya Sir.")
             }
+        } else if (requestCode == SMS_REQ) {
+            val r = smsResult
+            smsResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                // Minta SEND juga sekalian (balasan SMS butuh kirim).
+                if (ContextCompat.checkSelfPermission(
+                        this, Manifest.permission.SEND_SMS
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    r.success("OK")
+                } else {
+                    smsResult = r
+                    ActivityCompat.requestPermissions(
+                        this, arrayOf(Manifest.permission.SEND_SMS), SMS_REQ
+                    )
+                }
+            } else {
+                r.success("DENIED:Butuh izin SMS. Buka Settings HP > Apps > JARVIS > Permissions > SMS > Allow ya Sir.")
+            }
+        } else if (requestCode == LOC_REQ) {
+            val r = locResult
+            locResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Butuh izin lokasi untuk kirim titik. Buka Settings HP > Apps > JARVIS > Permissions > Location > Allow ya Sir.")
+            }
         } else if (requestCode == CONTACT_REQ) {
             val r = contactResult
             contactResult = null
@@ -848,6 +912,46 @@ class MainActivity : FlutterActivity() {
         contactResult = result
         ActivityCompat.requestPermissions(
             this, arrayOf(Manifest.permission.READ_CONTACTS), CONTACT_REQ
+        )
+    }
+
+    /** Izin SMS (baca perintah + kirim balasan find-my-phone). */
+    private fun requestSms(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECEIVE_SMS
+            ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.SEND_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        smsResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS),
+            SMS_REQ
+        )
+    }
+
+    /** Izin lokasi (titik GPS untuk SMS FIND). */
+    private fun requestLoc(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        locResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
+            LOC_REQ
         )
     }
 
@@ -1105,6 +1209,37 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             "Gagal pasang shortcut: ${e.message}"
         }
+    }
+
+    /** Status akses notifikasi (syarat baca/balas pesan masuk). */
+    private fun notifStatus(): String {
+        return try {
+            val flat = ComponentName(this, JarvisNotifService::class.java)
+                .flattenToString()
+            val enabled = Settings.Secure.getString(
+                contentResolver, "enabled_notification_listeners"
+            ) ?: ""
+            if (enabled.contains(flat)) "OK"
+            else "BELUM: aktifkan di Settings > Notifications > Notification access > Jarvis."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    private fun notifLast(): String {
+        val m = NotifStore.latest ?: return "NONE:Belum ada pesan masuk, Sir."
+        return "MSG:${m.sender}|${m.text}"
+    }
+
+    private fun notifReply(text: String, sender: String): String {
+        if (text.isBlank()) return "Mau balas apa, Sir?"
+        val target = if (sender.isBlank()) null else NotifStore.findBySender(sender)
+        if (!sender.isBlank() && target == null) {
+            return "Tidak ada pesan dari $sender, Sir."
+        }
+        val r = NotifStore.replyTo(target, text)
+        if (r.startsWith("OK:")) return "OK:Terkirim ke ${r.substring(3)}, Sir."
+        return r
     }
 
     /** Daftar app ber-launcher "label|package" per baris, urut A-Z. */

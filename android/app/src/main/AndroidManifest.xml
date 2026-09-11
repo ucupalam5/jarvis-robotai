@@ -13,6 +13,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Baca kontak (chat WA / telpon pakai nama, bukan angka) -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Find-my-phone via SMS + lokasi -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- WiFi + Bluetooth toggle (Android 10+ wifi dialihkan ke panel) -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
@@ -127,6 +132,17 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Telinga notifikasi: baca + balas WA/Telegram/SMS masuk -->
+        <service
+            android:name=".JarvisNotifService"
+            android:label="Jarvis"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Popup robot Jarvis (foreground service + overlay window).
              specialUse dipakai khusus Android 14+ via kode (runtime),
              jadi tanpa foregroundServiceType di manifest agar lolos install
@@ -162,6 +178,15 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+
+        <!-- SMS darurat: KODE RING/LOCK/FIND dari HP lain -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Widget home screen: tap = buka + langsung dengar -->
         <receiver
