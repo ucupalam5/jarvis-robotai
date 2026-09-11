@@ -13,6 +13,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Baca kontak (chat WA / telpon pakai nama, bukan angka) -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- WiFi + Bluetooth toggle (Android 10+ wifi dialihkan ke panel) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Auto-update: install APK dari GitHub Release -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Pengingat terjadwal (coba exact, fallback biasa bila ditolak) -->

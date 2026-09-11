@@ -93,9 +93,9 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "bukain ig dong" ---
-  // (layar/hp/hape/alarm/senter/lampu dikecualikan: itu perintah daya/jam)
+  // (layar/hp/hape/alarm/chat/senter/lampu dikecualikan: perintah lain)
   if (has(['buka', 'bukain', 'bukakan', 'open', 'jalankan', 'nyalain', 'idupin', 'hidupin']) &&
-      !has(['layar', 'hp', 'hape', 'handphone', 'alarm', 'senter', 'lampu'])) {
+      !has(['layar', 'hp', 'hape', 'handphone', 'alarm', 'chat', 'senter', 'lampu'])) {
     String target = s
         .replaceAll(
             RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain|idupin|hidupin)'),
@@ -344,14 +344,24 @@ ParsedCommand parseLocalCommand(String rawText) {
 
   // --- CHAT WA: "buka wa chat mama" / "wa ke 0812 halo bro" ---
   // Nama kontak dicari di HP (butuh izin kontak), nomor langsung gas.
-  if (has(['wa', 'whatsapp']) && has(['chat', 'pesan', 'kirim', 'ke'])) {
-    // Ambil nama/nomor setelah kata 'chat'/'ke', buang kata 'wa'.
+  // (Blok ini SEBELUM blok SMS agar "chat" tidak nyasar.
+  //  "buka chat X" tanpa kata wa pun dianggap WA: paling umum di Indonesia.)
+  if ((has(['wa', 'whatsapp']) || has(['buka chat', 'open chat'])) &&
+      !has(['layar', 'senter', 'lampu']) &&
+      has(['chat', 'pesan', 'kirim', 'ke', 'tulis'])) {
+    // Ambil nama/nomor: buang kata perintah berulang-ulang.
     var rest = s
         .replaceFirst(RegExp(r'^(buka|bukain|tolong|dong|coba)\s+'), '')
         .replaceAll(RegExp(r'\b(wa|whatsapp)\b'), ' ')
-        .replaceFirst(RegExp(r'^(ke|chat|pesan|kirim)\s+'), '')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+    for (var i = 0; i < 3; i++) {
+      final next = rest
+          .replaceFirst(RegExp(r'^(ke|chat|pesan|kirim|tulis)\s+'), '')
+          .trim();
+      if (next == rest) break;
+      rest = next;
+    }
     // Pisahkan pesan: "... pesannya halo" -> nama + isi.
     var body = '';
     final bodyM =
@@ -409,21 +419,7 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- PENGATURAN CEPAT: "pengaturan wifi" / "setting suara" ---
-  if (t.contains('wifi')) {
-    return ParsedCommand(
-      handledLocally: true,
-      reply: 'Membuka pengaturan WiFi, Sir.',
-      action: () => AppController.openSettingsPage('wifi'),
-    );
-  }
-  if (t.contains('bluetooth') || t.contains('blutut')) {
-    return ParsedCommand(
-      handledLocally: true,
-      reply: 'Membuka pengaturan Bluetooth, Sir.',
-      action: () => AppController.openSettingsPage('bluetooth'),
-    );
-  }
+  // --- PENGATURAN SUARA TTS ---
   if (t.contains('setting suara') ||
       t.contains('pengaturan suara') ||
       t.contains('suara google') ||
@@ -707,8 +703,8 @@ ParsedCommand parseLocalCommand(String rawText) {
 
   // --- LIHAT LAYAR: AI membaca screenshot ("lihat layar") ---
   if (has([
-    'lihat layar', 'baca layar', 'tangkap layar', 'screenshot',
-    'apa yang tampil', 'apa di layar', 'jelaskan layar'
+    'lihat layar', 'baca layar', 'apa yang tampil', 'apa di layar',
+    'jelaskan layar'
   ])) {
     return ParsedCommand(
       handledLocally: true,
@@ -721,6 +717,144 @@ ParsedCommand parseLocalCommand(String rawText) {
         return 'VISION:$shot';
       },
     );
+  }
+
+  // --- TANGKAP LAYAR ke galeri ("screenshot", "ss") ---
+  if (has(['tangkap layar', 'screenshot', 'ambil screenshot']) ||
+      s == 'ss' ||
+      s.startsWith('ss ')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menangkap layar, Sir.',
+      action: () async {
+        final r = await AppController.saveShot();
+        if (r.startsWith('OK:')) return 'SAY:${r.substring(3)}';
+        if (r.startsWith('ERR:')) return 'SAY:${r.substring(4)}';
+        return 'SAY:$r';
+      },
+    );
+  }
+
+  // --- REKAM LAYAR ("rekam layar", "stop rekam") ---
+  if (has(['rekam layar', 'mulai rekam', 'merekam layar'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menyiapkan rekaman, Sir. Izinkan di dialog yang muncul.',
+      action: () async {
+        final r = await AppController.startRecording();
+        if (r.startsWith('BATAL:')) return 'SAY:${r.substring(6)}';
+        if (r.startsWith('OK:')) return 'SAY:${r.substring(3)}';
+        return 'SAY:$r';
+      },
+    );
+  }
+  if (has(['stop rekam', 'setop rekam', 'berhenti rekam', 'berhenti merekam',
+      'selesai rekam'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menghentikan rekaman, Sir.',
+      action: () async {
+        final r = await AppController.stopRecording();
+        if (r.startsWith('TIDAK_MEREKAM:')) {
+          return 'SAY:${r.substring('TIDAK_MEREKAM:'.length)}';
+        }
+        if (r.startsWith('OK:')) return 'SAY:${r.substring(3)}';
+        return 'SAY:$r';
+      },
+    );
+  }
+
+  // --- WIFI ("nyalakan wifi", "matikan wifi") ---
+  if (has(['wifi', 'wi-fi'])) {
+    final on = !(has(['mati', 'matikan', 'matiin', 'off']));
+    return ParsedCommand(
+      handledLocally: true,
+      reply: on ? 'Mengurus WiFi, Sir.' : 'Mematikan WiFi, Sir.',
+      action: () => AppController.setWifi(on),
+    );
+  }
+
+  // --- BLUETOOTH ("nyalakan bluetooth", "matikan bluetooth") ---
+  if (has(['bluetooth', 'blutut', 'blututh'])) {
+    // Bukan buka halaman setting (itu sudah ada) -> toggle nyala/mati.
+    if (has(['pengaturan', 'setting'])) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Membuka pengaturan Bluetooth, Sir.',
+        action: () => AppController.openSettingsPage('bluetooth'),
+      );
+    }
+    final on = !(has(['mati', 'matikan', 'matiin', 'off']));
+    return ParsedCommand(
+      handledLocally: true,
+      reply: on ? 'Menyalakan Bluetooth, Sir.' : 'Mematikan Bluetooth, Sir.',
+      action: () async {
+        final p = await AppController.requestBt();
+        if (p != 'OK') return 'SAY:$p';
+        final r = await AppController.setBluetooth(on);
+        if (r.startsWith('NEED_BT:')) {
+          return 'SAY:${r.substring('NEED_BT:'.length)}';
+        }
+        return r;
+      },
+    );
+  }
+
+  // --- FOTO ("foto", "selfie") ---
+  if (s == 'foto' ||
+      s.startsWith('foto ') ||
+      s.contains('ambil foto') ||
+      s.contains('selfie') ||
+      s.contains('foto selfie')) {
+    final front = s.contains('selfie') || s.contains('depan');
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka kamera, Sir.',
+      action: () => AppController.takePhoto(front),
+    );
+  }
+
+  // --- BRIEFING PAGI (jam + tanggal + baterai, 100% offline) ---
+  if (has(['briefing', 'laporan pagi', 'info pagi', 'ringkasan pagi'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menyiapkan briefing, Sir.',
+      action: () async {
+        const hari = [
+          'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'
+        ];
+        const bulan = [
+          '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+          'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ];
+        final now = DateTime.now();
+        final hh = now.hour.toString().padLeft(2, '0');
+        final mm = now.minute.toString().padLeft(2, '0');
+        var bat = '';
+        try {
+          final r = await AppController.getBattery();
+          final m = RegExp(r'BATERAI:(\d+)').firstMatch(r);
+          if (m != null) bat = ', baterai ${m.group(1)} persen';
+        } catch (_) {}
+        return 'SAY:Selamat pagi Sir. Hari ${hari[now.weekday - 1]}, '
+            '${now.day} ${bulan[now.month]} ${now.year}, jam $hh lewat $mm$bat. '
+            'Ada yang bisa saya bantu?';
+      },
+    );
+  }
+
+  // --- LAWAKAN receh (100% offline) ---
+  if (has(['lawak', 'lucu', 'humor', 'guyon', 'ketawa'])) {
+    const jokes = [
+      'Kenapa programmer benci alam? Karena terlalu banyak bug, Sir.',
+      'Kenapa HP tidak pernah bohong? Karena selalu ada sinyal kebenaran, Sir.',
+      'Apa bedanya Sir dengan WiFi? WiFi kadang hilang, Sir selalu ada buat saya.',
+      'Kenapa baterai optimis? Karena selalu berpikir positif dan negatif sekaligus, Sir.',
+      'Saya mau cuti Sir... tapi saya tinggal di HP ini.',
+    ];
+    final pick =
+        jokes[DateTime.now().millisecond % jokes.length];
+    return ParsedCommand(handledLocally: true, reply: '$pick');
   }
 
   // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---

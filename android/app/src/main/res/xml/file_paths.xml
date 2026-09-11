@@ -2,4 +2,6 @@
 <paths>
     <!-- File APK update yang diunduh DownloadManager -->
     <external-files-path name="dl" path="Download/" />
+    <!-- Hasil foto kamera Jarvis -->
+    <external-files-path name="pics" path="Pictures/" />
 </paths>

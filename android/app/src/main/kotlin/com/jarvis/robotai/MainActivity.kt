@@ -48,6 +48,13 @@ class MainActivity : FlutterActivity() {
     private val CAM_REQ = 2005
     private val CONTACT_REQ = 2006
     private var contactResult: MethodChannel.Result? = null
+    private val BT_REQ = 2008
+    private var btResult: MethodChannel.Result? = null
+    private val REC_REQ = 2009
+    private var recResult: MethodChannel.Result? = null
+    private var mediaProjection: MediaProjection? = null
+    private var recorder: MediaRecorder? = null
+    private var recFile: java.io.File? = null
     private var hfWl: PowerManager.WakeLock? = null
     @Volatile private var pendingAutolisten = false
 
@@ -222,6 +229,33 @@ class MainActivity : FlutterActivity() {
                                 runOnUiThread { result.success("ERR:${e.message}") }
                             }
                         }.start()
+                    }
+                    // --- Simpan screenshot ke galeri ---
+                    "saveShot" -> {
+                        Thread {
+                            val r = saveShot()
+                            runOnUiThread { result.success(r) }
+                        }.start()
+                    }
+                    // --- Rekam layar (butuh persetujuan sekali via dialog) ---
+                    "startRecording" -> startRecording(result)
+                    "stopRecording" -> result.success(stopRecording())
+                    "isRecording" ->
+                        result.success(if (recorder != null) "YA" else "TIDAK")
+                    // --- WiFi / Bluetooth ---
+                    "setWifi" -> {
+                        val on = call.argument<Boolean>("on") ?: true
+                        result.success(setWifi(on))
+                    }
+                    "setBluetooth" -> {
+                        val on = call.argument<Boolean>("on") ?: true
+                        result.success(setBluetooth(on))
+                    }
+                    "requestBt" -> requestBt(result)
+                    // --- Foto via kamera ---
+                    "takePhoto" -> {
+                        val front = call.argument<Boolean>("front") ?: false
+                        result.success(takePhoto(front))
                     }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
@@ -582,6 +616,169 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Butuh izin kontak untuk chat/telpon pakai nama. Buka Settings HP > Apps > JARVIS > Permissions > Contacts > Allow ya Sir.")
             }
+        } else if (requestCode == BT_REQ) {
+            val r = btResult
+            btResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Butuh izin Bluetooth. Buka Settings HP > Apps > JARVIS > Permissions > Nearby devices > Allow ya Sir.")
+            }
+        }
+    }
+
+    /** Izin Bluetooth Android 12+ (untuk nyala/mati bluetooth). */
+    private fun requestBt(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 31) {
+            result.success("OK")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        btResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), BT_REQ
+        )
+    }
+
+    /** Simpan screenshot layar ke galeri (Pictures/Jarvis). */
+    private fun saveShot(): String {
+        return try {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var shot = "ERR:waktu habis"
+            JarvisAccessibilityService.screenshot { r ->
+                shot = r
+                latch.countDown()
+            }
+            latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+            if (shot.startsWith("ERR:")) return shot
+            val src = java.io.File(shot)
+            if (!src.exists()) return "ERR:file screenshot hilang"
+            val name = "jarvis_${System.currentTimeMillis()}.jpg"
+            val values = ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(
+                        android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/Jarvis"
+                    )
+                    put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+            val uri = contentResolver.insert(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                values
+            ) ?: return "ERR:galeri menolak"
+            contentResolver.openOutputStream(uri)?.use { o ->
+                java.io.FileInputStream(src).use { it.copyTo(o) }
+            }
+            if (Build.VERSION.SDK_INT >= 29) {
+                values.clear()
+                values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                contentResolver.update(uri, values, null, null)
+            } else {
+                @Suppress("DEPRECATION")
+                sendBroadcast(
+                    Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri)
+                )
+            }
+            "OK:$name tersimpan di galeri (Pictures/Jarvis), Sir."
+        } catch (e: Exception) {
+            "ERR:${e.message}"
+        }
+    }
+
+    /** Mulai rekam layar (dialog persetujuan sistem sekali). */
+    private fun startRecording(result: MethodChannel.Result) {
+        if (recorder != null) {
+            result.success("OK:Sedang merekam, Sir.")
+            return
+        }
+        recResult = result
+        try {
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                as MediaProjectionManager
+            @Suppress("DEPRECATION")
+            startActivityForResult(mpm.createScreenCaptureIntent(), REC_REQ)
+        } catch (e: Exception) {
+            recResult = null
+            result.success("Gagal minta izin rekam: ${e.message}")
+        }
+    }
+
+    /** Hentikan rekaman. Return OK:path / TIDAK_MEREKAM. */
+    private fun stopRecording(): String {
+        val rec = recorder ?: return "TIDAK_MEREKAM:Tidak sedang merekam, Sir."
+        return try {
+            try {
+                rec.stop()
+            } catch (_: Exception) {}
+            try {
+                rec.reset()
+                rec.release()
+            } catch (_: Exception) {}
+            recorder = null
+            try {
+                mediaProjection?.stop()
+            } catch (_: Exception) {}
+            mediaProjection = null
+            val p = recFile?.absolutePath ?: ""
+            "OK:Rekaman tersimpan, Sir.${if (p.isNotEmpty()) " ($p)" else ""}"
+        } catch (e: Exception) {
+            recorder = null
+            "Gagal stop rekam: ${e.message}"
+        }
+    }
+
+    /** WiFi: Android 10+ hanya bisa via panel (aturan Google). */
+    private fun setWifi(on: Boolean): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val i = Intent(Settings.Panel.ACTION_WIFI)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                "OK:Panel WiFi dibuka, Sir. Sentuh sekali untuk " +
+                    (if (on) "menyalakan." else "mematikan.")
+            } else {
+                @Suppress("DEPRECATION")
+                val wm = applicationContext
+                    .getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                wm.isWifiEnabled = on
+                "OK"
+            }
+        } catch (e: Exception) {
+            "Gagal wifi: ${e.message}"
+        }
+    }
+
+    /** Bluetooth nyala/mati (butuh izin Nearby devices di Android 12+). */
+    private fun setBluetooth(on: Boolean): String {
+        return try {
+            @Suppress("DEPRECATION")
+            val ba = BluetoothAdapter.getDefaultAdapter()
+                ?: return "HP ini tidak punya Bluetooth."
+            if (on) {
+                @Suppress("DEPRECATION")
+                if (!ba.enable()) return "Bluetooth ditolak sistem. Nyalakan manual ya Sir."
+            } else {
+                @Suppress("DEPRECATION")
+                if (!ba.disable()) return "Bluetooth ditolak sistem. Matikan manual ya Sir."
+            }
+            "OK"
+        } catch (e: SecurityException) {
+            "NEED_BT:Butuh izin Nearby devices ya Sir."
+        } catch (e: Exception) {
+            "Gagal bluetooth: ${e.message}"
         }
     }
 
@@ -956,7 +1153,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    @Deprecated("dipakai untuk galeri picker")
+    @Deprecated("dipakai untuk galeri picker + izin rekam layar")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PICK_REQ) {
@@ -976,6 +1173,83 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("BATAL")
             }
+        } else if (requestCode == REC_REQ) {
+            val r = recResult
+            recResult = null
+            if (r == null) return
+            if (resultCode != Activity.RESULT_OK || data == null) {
+                r.success("BATAL:Izin rekam ditolak, Sir.")
+                return
+            }
+            try {
+                val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                    as MediaProjectionManager
+                mediaProjection = mpm.getMediaProjection(resultCode, data)
+                val dm = resources.displayMetrics
+                val w = dm.widthPixels
+                val h = dm.heightPixels
+                val dir = File(
+                    getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Jarvis"
+                )
+                dir.mkdirs()
+                recFile = File(dir, "rekam_${System.currentTimeMillis()}.mp4")
+                val rec = if (Build.VERSION.SDK_INT >= 31) {
+                    MediaRecorder(this)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaRecorder()
+                }
+                rec.apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setVideoSize(w, h)
+                    setVideoFrameRate(30)
+                    setVideoEncodingBitRate(6 * 1024 * 1024)
+                    setOutputFile(recFile!!.absolutePath)
+                    prepare()
+                }
+                mediaProjection!!.createVirtualDisplay(
+                    "jarvis-rec", w, h, dm.densityDpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    rec.surface, null, null
+                )
+                rec.start()
+                recorder = rec
+                r.success("OK:Merekam layar + suara, Sir. Ucapkan 'stop rekam'. Jangan tutup app.")
+            } catch (e: Exception) {
+                try {
+                    recorder?.release()
+                } catch (_: Exception) {}
+                recorder = null
+                r.success("Gagal merekam: ${e.message}")
+            }
+        }
+    }
+
+    /** Foto via kamera (depan opsional). Hasil ke folder Jarvis. */
+    private fun takePhoto(front: Boolean): String {
+        return try {
+            val dir = File(
+                getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Jarvis"
+            )
+            dir.mkdirs()
+            val f = File(dir, "foto_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", f
+            )
+            val i = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+                if (front) putExtra("android.intent.extras.CAMERA_FACING", 1)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(i)
+            "OK:Kamera dibuka, Sir. Jepret, hasilnya di folder Jarvis."
+        } catch (e: Exception) {
+            "Gagal buka kamera: ${e.message}"
         }
     }
 }

@@ -88,6 +88,17 @@ class AppController {
   // --- Screenshot layar (AI bisa melihat) ---
   static Future<String> screenshot() => _invoke('screenshot');
 
+  // --- Tangkap layar ke galeri + rekam layar + wifi/bt + foto ---
+  static Future<String> saveShot() => _invoke('saveShot');
+  static Future<String> startRecording() => _invoke('startRecording');
+  static Future<String> stopRecording() => _invoke('stopRecording');
+  static Future<String> setWifi(bool on) => _invoke('setWifi', {'on': on});
+  static Future<String> setBluetooth(bool on) =>
+      _invoke('setBluetooth', {'on': on});
+  static Future<String> requestBt() => _invoke('requestBt');
+  static Future<String> takePhoto(bool front) =>
+      _invoke('takePhoto', {'front': front});
+
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
   static Future<String> accOpenSettings() => _invoke('accOpenSettings');

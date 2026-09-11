@@ -10,12 +10,12 @@ class GroqService {
   String apiKey;
   static const String _url = 'https://api.groq.com/openai/v1/chat/completions';
 
-  /// Model utama + cadangan. llama-3.3-70b-versatile PENSIUN 16 Agu 2026
-  /// (semua request 404) -> diganti gpt-oss dengan fallback otomatis.
-  /// Urutan: pintar dulu (120b), kalau 404/tidak ada -> yang cepat (20b).
+  /// Model utama + cadangan. llama pensiun Agu 2026 -> 404.
+  /// Urutan: CEPAT dulu (20b, ratusan token/detik) agar respon sat-set,
+  /// kalau gagal -> pintar (120b) -> cadangan (qwen).
   static const List<String> models = [
-    'openai/gpt-oss-120b',
     'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b',
     'qwen/qwen3.6-27b',
   ];
 

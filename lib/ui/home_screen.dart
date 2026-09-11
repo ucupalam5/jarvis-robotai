@@ -612,12 +612,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Satu putaran dengar-proses. Dipakai tap orb maupun handsfree loop.
   Future<void> _listenCycle() async {
-    setState(() {
-      _listening = true;
-      _draft = 'Mendengarkan...';
-      _level = 0;
+    // Gagal dengar sekali (kosong padahal mic OK) -> ulangi OTOMATIS 1x.
+    // User tidak perlu tap/coba 2x manual.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final heard = await _listenAttempt(isRetry: attempt > 0);
+      if (heard || _handsfree || !mounted) return;
+    }
+  }
+
+  /// Satu percobaan dengar. Return true bila ada hasil final yang jelas
+  /// (ditangani / diberi penuntun). false = kosong misterius, layak ulangi.
+  Future<bool> _listenAttempt({bool isRetry = false}) async {
+    if (mounted) {
+      setState(() {
+        _listening = true;
+        _draft = isRetry ? 'Ulangi dengar, Sir...' : 'Mendengarkan...';
+        _level = 0;
+      });
+    }
+    // Tanda SIAP: bila 1 detik belum ada suara masuk, pastikan user tahu.
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted &&
+          _listening &&
+          (_draft == 'Mendengarkan...' ||
+              _draft == 'Ulangi dengar, Sir...')) {
+        setState(() => _draft = 'Siap! Bicara Bahasa Indonesia, Sir.');
+      }
     });
     final start = DateTime.now();
+    var gotSomething = false;
     await widget.voice.listenOnce(onResult: (txt, finalR, alts) async {
       if (!mounted) return;
       setState(() => _draft = txt.isEmpty ? 'Mendengarkan...' : txt);
@@ -642,24 +665,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
         if (chosen != null && chosenCmd != null) {
+          gotSomething = true;
           if (chosen != txt && mounted) {
             setState(() => _draft = chosen!);
           }
           await _runLocal(chosen!, chosenCmd);
         } else if (txt.trim().isNotEmpty) {
+          gotSomething = true;
           await _handleText(txt);
         } else if (!_handsfree &&
             DateTime.now().difference(start).inMilliseconds > 1500) {
-          // Bukan tap-batal (user bicara tapi tak tertangkap): beri penuntun.
+          // Kosong: cek mic. Kalau mic OK -> false agar diulangi otomatis.
+          // Kalau mic ditolak -> beri penuntun (true = selesai).
           final mic = await widget.voice.hasMicPermission;
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              duration: const Duration(seconds: 5),
-              content: Text(mic
-                  ? 'Tidak dengar suara, Sir. Bicara lebih dekat + keras, atau install paket suara Indonesia di Settings HP > Bahasa.'
-                  : 'Izin microphone ditolak, Sir. Buka Settings HP > Apps > JARVIS > Permissions > Microphone > Allow.'),
-            ));
+          if (!mic) {
+            gotSomething = true;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                duration: Duration(seconds: 5),
+                content: Text(
+                    'Izin microphone ditolak, Sir. Buka Settings HP > Apps > JARVIS > Permissions > Microphone > Allow.'),
+              ));
+            }
           }
+        } else {
+          gotSomething = true; // tap-batal / terlalu cepat: anggap selesai.
         }
       }
     }, onLevel: (v) {
@@ -668,6 +698,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() => _level = v);
       }
     });
+    if (!gotSomething && mounted && !_handsfree) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        duration: Duration(seconds: 4),
+        content: Text(
+            'Kurang jelas, Sir. Bicara dekat + keras Bahasa Indonesia. Atau install paket suara Indonesia di Settings HP > Bahasa.'),
+      ));
+    }
     // timeout pengaman 22 detik (listenFor 20 dtk + toleransi)
     Future.delayed(const Duration(seconds: 22), () async {
       if (_listening && mounted) {
@@ -675,6 +712,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() => _listening = false);
       }
     });
+    return gotSomething;
   }
 
   @override

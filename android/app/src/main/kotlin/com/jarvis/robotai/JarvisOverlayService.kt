@@ -18,7 +18,10 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.bluetooth.BluetoothAdapter
+import android.content.ContentValues
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +29,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.AlarmClock
+import android.provider.MediaStore
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -672,6 +677,113 @@ class JarvisOverlayService : Service() {
                 speak("Jam berapa alarmnya Sir? Contoh: pasang alarm jam 6 pagi.")
                 return
             }
+            // TANGKAP LAYAR ke galeri ("screenshot", "ss").
+            if (has(listOf("tangkap layar", "screenshot", "ambil screenshot")) ||
+                s == "ss" || s.startsWith("ss ")
+            ) {
+                speak("Menangkap layar, Sir.")
+                saveShotToGallery()
+                return
+            }
+            // REKAM LAYAR butuh Activity: arahkan buka app.
+            if (s.contains("rekam layar") || s.contains("mulai rekam") ||
+                s.contains("stop rekam") || s.contains("berhenti rekam")
+            ) {
+                speak("Buka app Jarvis untuk rekam layar ya Sir. Di sana ucapkan rekam layar.")
+                openAppAutoListen()
+                return
+            }
+            // WIFI
+            if (s.contains("wifi") || s.contains("wi-fi")) {
+                val on = !(s.contains("mati") || s.contains("matikan") ||
+                    s.contains("matiin") || s.contains("off"))
+                try {
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        val i = Intent(Settings.Panel.ACTION_WIFI)
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(i)
+                        speak("Panel WiFi dibuka, Sir.")
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val wm = applicationContext
+                            .getSystemService(Context.WIFI_SERVICE) as WifiManager
+                        @Suppress("DEPRECATION")
+                        wm.isWifiEnabled = on
+                        speak(if (on) "WiFi nyala." else "WiFi mati.")
+                    }
+                } catch (_: Exception) {
+                    speak("WiFi gagal, Sir.")
+                }
+                return
+            }
+            // BLUETOOTH
+            if (s.contains("bluetooth") || s.contains("blutut")) {
+                if (s.contains("pengaturan") || s.contains("setting")) {
+                    try {
+                        val i = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(i)
+                    } catch (_: Exception) {}
+                    return
+                }
+                val on = !(s.contains("mati") || s.contains("matikan") ||
+                    s.contains("matiin") || s.contains("off"))
+                try {
+                    @Suppress("DEPRECATION")
+                    val ba = BluetoothAdapter.getDefaultAdapter()
+                    if (ba == null) {
+                        speak("HP ini tidak punya Bluetooth.")
+                    } else {
+                        @Suppress("DEPRECATION")
+                        if (on) ba.enable() else ba.disable()
+                        speak(if (on) "Bluetooth nyala." else "Bluetooth mati.")
+                    }
+                } catch (_: Exception) {
+                    speak("Bluetooth butuh izin Nearby devices. Buka app Jarvis sekali ya Sir.")
+                }
+                return
+            }
+            // FOTO (buka kamera; jepret manual)
+            if (s == "foto" || s.startsWith("foto ") || s.contains("ambil foto") ||
+                s.contains("selfie")
+            ) {
+                try {
+                    val i = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    speak("Kamera dibuka, Sir.")
+                } catch (_: Exception) {
+                    speak("Kamera gagal dibuka.")
+                }
+                return
+            }
+            // BRIEFING (offline)
+            if (s.contains("briefing") || s.contains("laporan pagi")) {
+                try {
+                    val now = java.util.Date()
+                    val day = java.text.SimpleDateFormat("EEEE", Locale("id", "ID")).format(now)
+                    val date = java.text.SimpleDateFormat("d MMMM yyyy", Locale("id", "ID")).format(now)
+                    val hm = java.text.SimpleDateFormat("HH:mm", Locale("id", "ID")).format(now)
+                    val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                    val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    speak("Selamat pagi Sir. Hari $day, $date, jam $hm, baterai $pct persen.")
+                } catch (_: Exception) {
+                    speak("Briefing gagal Sir.")
+                }
+                return
+            }
+            // LAWAKAN receh (offline)
+            if (s.contains("lawak") || s.contains("lucu") || s.contains("humor") ||
+                s.contains("guyon")
+            ) {
+                val jokes = listOf(
+                    "Kenapa programmer benci alam? Karena terlalu banyak bug, Sir.",
+                    "Kenapa HP tidak pernah bohong? Karena selalu ada sinyal kebenaran, Sir.",
+                    "Saya mau cuti Sir... tapi saya tinggal di HP ini."
+                )
+                speak(jokes[(System.currentTimeMillis() % jokes.size).toInt()])
+                return
+            }
             // LIHAT LAYAR: screenshot + AI vision menjelaskan.
             if (has(
                     listOf(
@@ -775,6 +887,51 @@ class JarvisOverlayService : Service() {
                 JarvisAccessibilityService.swipeUp()
             } catch (_: Exception) {}
         }, 1200)
+    }
+
+    /** Tangkap layar lalu simpan ke galeri (Pictures/Jarvis). */
+    private fun saveShotToGallery() {
+        JarvisAccessibilityService.screenshot { r ->
+            handler.post {
+                if (r.startsWith("ERR:")) {
+                    speak(r.removePrefix("ERR:"))
+                    return@post
+                }
+                try {
+                    val src = File(r)
+                    val name = "jarvis_${System.currentTimeMillis()}.jpg"
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        if (Build.VERSION.SDK_INT >= 29) {
+                            put(
+                                MediaStore.Images.Media.RELATIVE_PATH,
+                                "Pictures/Jarvis"
+                            )
+                            put(MediaStore.Images.Media.IS_PENDING, 1)
+                        }
+                    }
+                    val uri = contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                    )
+                    if (uri == null) {
+                        speak("Galeri menolak, Sir.")
+                        return@post
+                    }
+                    contentResolver.openOutputStream(uri)?.use { o ->
+                        java.io.FileInputStream(src).use { it.copyTo(o) }
+                    }
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        contentResolver.update(uri, values, null, null)
+                    }
+                    speak("$name tersimpan di galeri, Sir.")
+                } catch (_: Exception) {
+                    speak("Gagal simpan screenshot.")
+                }
+            }
+        }
     }
 
     private fun camIdList(): Array<String> {
@@ -1024,10 +1181,10 @@ class JarvisOverlayService : Service() {
         }
         setSubtitle("Tanya AI...")
         Thread {
-            // Model + cadangan (llama pensiun Agu 2026 -> 404, coba berikutnya).
+            // Model + cadangan. Urutan cepat dulu agar sat-set.
             val models = listOf(
-                "openai/gpt-oss-120b",
                 "openai/gpt-oss-20b",
+                "openai/gpt-oss-120b",
                 "qwen/qwen3.6-27b"
             )
             var done = false
