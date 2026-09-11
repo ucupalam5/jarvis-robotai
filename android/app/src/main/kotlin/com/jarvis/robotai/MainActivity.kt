@@ -5,6 +5,8 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.DownloadManager
 import android.app.admin.DevicePolicyManager
+import android.bluetooth.BluetoothAdapter
+import android.content.ContentValues
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -18,7 +20,14 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.drawable.Icon
+import android.hardware.display.DisplayManager
 import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.media.MediaRecorder
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.net.wifi.WifiManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
