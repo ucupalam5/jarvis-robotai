@@ -509,9 +509,9 @@ class JarvisOverlayService : Service() {
             return false
         }
         try {
-            // BUKA APLIKASI
+            // BUKA APLIKASI (layar/hp/hape = perintah daya, BUKAN app)
             if (has(listOf("buka", "open", "jalankan", "nyalain", "idupin", "hidupin")) &&
-                !has(listOf("layar", "senter", "lampu"))
+                !has(listOf("layar", "hp", "hape", "handphone", "senter", "lampu"))
             ) {
                 var target = s.replace(
                     Regex("(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|idupin|hidupin)"),

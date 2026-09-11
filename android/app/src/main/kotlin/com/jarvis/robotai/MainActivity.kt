@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.AlarmClock
 import android.provider.Settings
+import android.view.KeyEvent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -32,7 +33,9 @@ class MainActivity : FlutterActivity() {
     private var micResult: MethodChannel.Result? = null
     private var pickResult: MethodChannel.Result? = null
     private var notifResult: MethodChannel.Result? = null
+    private var camResult: MethodChannel.Result? = null
     private val NOTIF_REQ = 2004
+    private val CAM_REQ = 2005
     private var hfWl: PowerManager.WakeLock? = null
     @Volatile private var pendingAutolisten = false
 
@@ -125,6 +128,20 @@ class MainActivity : FlutterActivity() {
                     }
                     // --- Izin notifikasi (untuk notif popup di Android 13+) ---
                     "requestNotif" -> requestNotif(result)
+                    // --- Izin kamera (untuk senter) ---
+                    "requestCamera" -> requestCamera(result)
+                    // --- Daftar semua aplikasi (bantu cari app) ---
+                    "listApps" -> result.success(listApps())
+                    // --- Mode dering HP: normal / getar / hening ---
+                    "ringerMode" -> {
+                        val m = call.argument<String>("mode") ?: "normal"
+                        result.success(ringerMode(m))
+                    }
+                    // --- Tombol media: musik pause/main/lagu ---
+                    "mediaKey" -> {
+                        val code = call.argument<Int>("code") ?: 85
+                        result.success(mediaKey(code))
+                    }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
                     "accOpenSettings" -> {
@@ -159,13 +176,18 @@ class MainActivity : FlutterActivity() {
             val pm = packageManager
             // 1) langsung sebagai package name
             var intent = pm.getLaunchIntentForPackage(keyword)
-            // 2) cari aplikasi yang mengandung keyword
+            // 2) cari aplikasi yang mengandung keyword (longgar: abaikan spasi).
             if (intent == null) {
+                val flat = keyword.replace(" ", "").lowercase()
                 val apps = pm.getInstalledApplications(0)
                 val found = apps.firstOrNull {
-                    it.packageName.contains(keyword, ignoreCase = true) ||
-                    (pm.getApplicationLabel(it)?.toString()
-                        ?.contains(keyword, ignoreCase = true) == true)
+                    val pkg = it.packageName
+                    val label = pm.getApplicationLabel(it)?.toString() ?: ""
+                    pkg.contains(keyword, ignoreCase = true) ||
+                    label.contains(keyword, ignoreCase = true) ||
+                    (flat.isNotEmpty() &&
+                        (pkg.replace(" ", "").contains(flat, ignoreCase = true) ||
+                            label.replace(" ", "").contains(flat, ignoreCase = true)))
                 }
                 if (found != null) intent = pm.getLaunchIntentForPackage(found.packageName)
             }
@@ -448,10 +470,88 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Notifikasi ditolak. Popup tetap jalan, tapi tanpa notif status ya Sir.")
             }
+        } else if (requestCode == CAM_REQ) {
+            val r = camResult
+            camResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Senter butuh izin kamera. Buka Settings HP > Apps > JARVIS > Permissions > Camera > Allow ya Sir.")
+            }
         }
     }
 
-    /** Izin notifikasi Android 13+ (untuk notif status popup). */
+    /** Izin kamera Android (untuk senter). */
+    private fun requestCamera(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        camResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.CAMERA), CAM_REQ
+        )
+    }
+
+    /** Daftar app ber-launcher "label|package" per baris, urut A-Z. */
+    private fun listApps(): String {
+        return try {
+            val pm = packageManager
+            val main = Intent(Intent.ACTION_MAIN, null)
+            main.addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(main, 0)
+                .mapNotNull {
+                    val label = it.loadLabel(pm)?.toString()?.trim()
+                    val pkg = it.activityInfo.packageName
+                    if (label.isNullOrEmpty()) null else "$label|$pkg"
+                }
+                .distinctBy { it.substringAfter("|") }
+                .sortedBy { it.substringBefore("|").lowercase() }
+                .joinToString("\n")
+        } catch (e: Exception) {
+            "ERR:${e.message}"
+        }
+    }
+
+    /** Mode dering: normal / getar / hening (tanpa izin tambahan). */
+    private fun ringerMode(mode: String): String {
+        return try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.ringerMode = when (mode) {
+                "vibrate" -> AudioManager.RINGER_MODE_VIBRATE
+                "silent" -> AudioManager.RINGER_MODE_SILENT
+                else -> AudioManager.RINGER_MODE_NORMAL
+            }
+            "OK"
+        } catch (e: SecurityException) {
+            "Matikan DND manual dulu ya Sir (mode Jangan Ganggu mengunci mode suara)."
+        } catch (e: Exception) {
+            "Gagal mode suara HP: ${e.message}"
+        }
+    }
+
+    /** Tombol media untuk musik (85 toggle, 126 main, 127 jeda, 87 next, 88 prev). */
+    private fun mediaKey(code: Int): String {
+        return try {
+            val down = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, code))
+            }
+            val up = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, code))
+            }
+            sendOrderedBroadcast(down, null)
+            sendOrderedBroadcast(up, null)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal kontrol musik: ${e.message}"
+        }
+    }
     private fun requestNotif(result: MethodChannel.Result) {
         if (Build.VERSION.SDK_INT < 33) {
             result.success("OK")

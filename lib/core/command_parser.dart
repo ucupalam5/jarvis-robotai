@@ -84,9 +84,9 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "bukain ig dong" ---
-  // (layar/senter/lampu dikecualikan -> ditangani blok khusus di bawah)
+  // (layar/hp/hape/senter/lampu dikecualikan: itu perintah daya, BUKAN app)
   if (has(['buka', 'bukain', 'bukakan', 'open', 'jalankan', 'nyalain', 'idupin', 'hidupin']) &&
-      !has(['layar', 'senter', 'lampu'])) {
+      !has(['layar', 'hp', 'hape', 'handphone', 'senter', 'lampu'])) {
     String target = s
         .replaceAll(
             RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain|idupin|hidupin)'),
@@ -325,6 +325,68 @@ ParsedCommand parseLocalCommand(String rawText) {
       handledLocally: true,
       reply: 'Membuka pengaturan Bluetooth, Sir.',
       action: () => AppController.openSettingsPage('bluetooth'),
+    );
+  }
+
+  // --- DAFTAR APLIKASI: bantu yang susah cari app ---
+  if (has(['daftar aplikasi', 'list aplikasi', 'semua aplikasi', 'cari aplikasi'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka daftar aplikasi, Sir. Ketik cari + tap untuk buka.',
+      action: () async => 'SHOW_APPS:',
+    );
+  }
+
+  // --- MODE DERING HP: getar / hening / normal ---
+  if (has(['mode getar']) || (s == 'getar' || s.contains('jadi getar'))) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'HP mode getar, Sir.',
+      action: () => AppController.ringerMode('vibrate'),
+    );
+  }
+  if (has(['mode hening', 'mode diam']) || s == 'hening') {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'HP mode hening, Sir.',
+      action: () => AppController.ringerMode('silent'),
+    );
+  }
+  if (has(['mode normal', 'mode dering', 'mode bunyi', 'mode nyala'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'HP mode normal, Sir.',
+      action: () => AppController.ringerMode('normal'),
+    );
+  }
+
+  // --- MUSIK: jeda / main / lagu berikutnya / sebelumnya ---
+  if (has(['musik jeda', 'musik pause', 'jeda musik', 'pause musik', 'berhenti musik'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Musik dijeda, Sir.',
+      action: () => AppController.mediaKey(127),
+    );
+  }
+  if (has(['musik main', 'lanjut musik', 'main musik', 'putar musik'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Musik main, Sir.',
+      action: () => AppController.mediaKey(126),
+    );
+  }
+  if (has(['lagu berikutnya', 'lagu selanjutnya', 'next lagu', 'ganti lagu'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Lagu berikutnya, Sir.',
+      action: () => AppController.mediaKey(87),
+    );
+  }
+  if (has(['lagu sebelumnya', 'lagu tadi', 'kembali lagu', 'putar ulang'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Kembali ke lagu sebelumnya, Sir.',
+      action: () => AppController.mediaKey(88),
     );
   }
 

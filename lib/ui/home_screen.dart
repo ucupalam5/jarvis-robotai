@@ -100,6 +100,106 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await AppController.requestNotif();
     } catch (_) {}
+    try {
+      await AppController.requestCamera();
+    } catch (_) {}
+  }
+
+  /// Dialog daftar semua aplikasi + kolom cari. Tap = buka.
+  Future<void> _openAppsDialog() async {
+    String raw = '';
+    try {
+      raw = await AppController.listApps();
+    } catch (e) {
+      raw = 'ERR:$e';
+    }
+    if (!mounted) return;
+    if (raw.startsWith('ERR:')) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Gagal baca aplikasi: $raw')));
+      return;
+    }
+    final all = raw
+        .split('\n')
+        .where((l) => l.contains('|'))
+        .map((l) {
+          final i = l.indexOf('|');
+          return MapEntry(l.substring(0, i), l.substring(i + 1));
+        })
+        .toList();
+    String q = '';
+    final searchCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final shown = q.isEmpty
+              ? all
+              : all
+                  .where((e) =>
+                      e.key.toLowerCase().contains(q.toLowerCase()))
+                  .toList();
+          return AlertDialog(
+            backgroundColor: const Color(0xFF0A1628),
+            title: Text('Aplikasi (${shown.length})',
+                style: const TextStyle(color: Colors.cyanAccent)),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 380,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: searchCtrl,
+                    onChanged: (v) => setD(() => q = v),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: 'Ketik nama app...',
+                      hintStyle: TextStyle(color: Colors.white30),
+                      prefixIcon:
+                          Icon(Icons.search, color: Colors.cyanAccent),
+                      enabledBorder: OutlineInputBorder(
+                          borderSide:
+                              BorderSide(color: Colors.cyanAccent)),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide:
+                              BorderSide(color: Colors.cyanAccent)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: shown.isEmpty
+                        ? const Center(
+                            child: Text('Tidak ketemu, Sir.',
+                                style: TextStyle(color: Colors.white54)))
+                        : ListView.builder(
+                            itemCount: shown.length,
+                            itemBuilder: (_, i) => ListTile(
+                              dense: true,
+                              title: Text(shown[i].key,
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14)),
+                              trailing: const Icon(Icons.open_in_new,
+                                  color: Colors.cyanAccent, size: 18),
+                              onTap: () async {
+                                Navigator.pop(ctx);
+                                await _handleText(
+                                    'buka ${shown[i].key}');
+                              },
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Tutup')),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _loadKey() async {
@@ -221,7 +321,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       reply = cmd.reply;
       if (cmd.action != null) {
         final res = await cmd.action!();
-        if (res.startsWith('SAY:')) {
+        if (res == 'SHOW_APPS:') {
+          if (mounted) _openAppsDialog();
+        } else if (res.startsWith('SAY:')) {
           reply = res.substring('SAY:'.length);
         } else if (res.startsWith('BATERAI_REPLY:')) {
           reply = res.substring('BATERAI_REPLY:'.length);
@@ -549,6 +651,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 _quick('Buka WA', () => _handleText('buka whatsapp')),
                 _quick('Buka YT', () => _handleText('buka youtube')),
+                _quick('Aplikasi', () => _openAppsDialog()),
                 _quick('Tutup app', () => AppController.closeApp()),
                 _quick('Home', () => AppController.goHome()),
                 _quick('Kunci layar', () => _handleText('kunci layar')),

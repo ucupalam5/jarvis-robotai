@@ -47,9 +47,17 @@ class AppController {
   static Future<String> handsfreeWake(bool on) =>
       _invoke('handsfreeWake', {'on': on});
 
-  // --- Popup tap -> auto dengar + izin notifikasi ---
+  // --- Popup tap -> auto dengar + izin notifikasi/kamera ---
   static Future<String> consumeAutolisten() => _invoke('consumeAutolisten');
   static Future<String> requestNotif() => _invoke('requestNotif');
+  static Future<String> requestCamera() => _invoke('requestCamera');
+
+  // --- Kontrol penuh HP ---
+  static Future<String> listApps() => _invoke('listApps');
+  static Future<String> ringerMode(String mode) =>
+      _invoke('ringerMode', {'mode': mode});
+  static Future<String> mediaKey(int code) =>
+      _invoke('mediaKey', {'code': code});
 
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
