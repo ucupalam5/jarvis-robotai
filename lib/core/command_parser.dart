@@ -65,18 +65,31 @@ const Map<String, String> appMap = {
 ParsedCommand parseLocalCommand(String rawText) {
   final t = rawText.toLowerCase().trim();
 
-  // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "tolong bukain ig" ---
+  // Normalisasi gaya Jakarta + salah-dengar STT ("nya lain" -> "nyalain"):
+  // - buang kata pengisi di awal (tolong, coba, eh, woi, bang)
+  // - versi tanpa spasi untuk pencocokan longgar
+  final s = t
+      .replaceAll(
+          RegExp(r'^(tolong|tolongin|coba|eh+|woi|woy|bang|min)\s+'), '')
+      .trim();
+  final c = s.replaceAll(RegExp(r'\s+'), '');
+
+  bool has(List<String> keys) {
+    for (final k in keys) {
+      if (s.contains(k)) return true;
+      final kc = k.replaceAll(' ', '');
+      if (kc.isNotEmpty && c.contains(kc)) return true;
+    }
+    return false;
+  }
+
+  // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "bukain ig dong" ---
   // (layar/senter/lampu dikecualikan -> ditangani blok khusus di bawah)
-  if ((t.contains('buka') ||
-          t.startsWith('open') ||
-          t.contains('jalankan') ||
-          t.contains('nyalain')) &&
-      !t.contains('layar') &&
-      !t.contains('senter') &&
-      !t.contains('lampu')) {
-    String target = t
+  if (has(['buka', 'bukain', 'bukakan', 'open', 'jalankan', 'nyalain', 'idupin', 'hidupin']) &&
+      !has(['layar', 'senter', 'lampu'])) {
+    String target = s
         .replaceAll(
-            RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain)'),
+            RegExp(r'(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|nyalakain|idupin|hidupin)'),
             '')
         .trim();
     // normalisasi "wasap" typo umum STT
@@ -122,16 +135,13 @@ ParsedCommand parseLocalCommand(String rawText) {
   // --- NYALAKAN LAYAR (layar-mati, bukan mati total).
   // Nyalakan via WakeLock + coba swipe buka kunci geser.
   // PIN/fingerprint tetap manual (blokir keamanan Android).
-  if (t.contains('nyalakan layar') ||
-      t.contains('nyalakan hp') ||
-      t.contains('nyalakan hape') ||
-      t.contains('nyalain layar') ||
-      t.contains('nyalain hp') ||
-      t.contains('nyalain hape') ||
-      t.contains('hidupkan layar') ||
-      t.contains('hidupkan hp') ||
-      t.contains('bangun') ||
-      t.contains('wake up')) {
+  if (has([
+    'nyalakan layar', 'nyalakan hp', 'nyalakan hape',
+    'nyalain layar', 'nyalain hp', 'nyalain hape',
+    'idupin layar', 'idupin hp', 'idupin hape',
+    'hidupkan layar', 'hidupkan hp', 'hidupkan hape',
+    'bangun', 'wake up'
+  ])) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Menyalakan layar, Sir.',
@@ -319,13 +329,10 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- KUNCI / MATIKAN LAYAR (senter/lampu dikecualikan) ---
-  final mauKunci = (t.contains('kunci') ||
-          t.contains('matiin') ||
-          t.contains('matikan')) &&
-      (t.contains('layar') || t.contains('hp') || t.contains('hape'));
-  if ((mauKunci || t.contains('lock')) &&
-      !t.contains('senter') &&
-      !t.contains('lampu')) {
+  final mauKunci = has(['kunci', 'matiin', 'matikan']) &&
+      has(['layar', 'hp', 'hape', 'handphone']);
+  if ((mauKunci || has(['lock'])) &&
+      !has(['senter', 'lampu'])) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Mengunci layar sekarang, Sir.',
@@ -334,8 +341,8 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- SENTER ---
-  if (t.contains('senter') || t.contains('flashlight') || t.contains('lampu')) {
-    final on = !(t.contains('mati'));
+  if (has(['senter', 'flashlight', 'lampu'])) {
+    final on = !has(['mati']);
     return ParsedCommand(
       handledLocally: true,
       reply: on ? 'Senter dinyalakan, Sir.' : 'Senter dimatikan, Sir.',

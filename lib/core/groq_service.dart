@@ -75,7 +75,7 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
                 'max_tokens': 300,
               }),
             )
-            .timeout(const Duration(seconds: 25));
+            .timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
           return (data['choices'][0]['message']['content'] as String).trim();
@@ -83,14 +83,15 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
         if (res.statusCode == 401) {
           return 'Sir, API key salah/expired (401). Buat baru di console.groq.com ya Sir.';
         }
-        // 404 = model pensiun/tidak ada -> coba model cadangan berikutnya.
+        // 404 (model pensiun) / 429 (kuota model ini habis) / 5xx:
+        // coba model cadangan (kuota Groq dihitung per model).
         lastErr = '${res.statusCode}';
-        if (res.statusCode != 404) {
-          return 'Sir, Groq jawab ${res.statusCode}. Cek kuota gratisnya ya Sir.';
-        }
       } catch (e) {
         lastErr = '$e';
       }
+    }
+    if (lastErr.contains('429')) {
+      return 'Sir, kuota gratis Groq habis (429). Tunggu ~1 menit lalu coba lagi ya Sir.';
     }
     return 'Sir, semua model Groq gagal ($lastErr). Cek internet / key / kuota ya Sir.';
   }

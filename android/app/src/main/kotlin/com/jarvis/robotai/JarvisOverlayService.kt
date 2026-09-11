@@ -494,12 +494,30 @@ class JarvisOverlayService : Service() {
 
     private fun handleVoiceCommand(raw: String) {
         val t = raw.lowercase().trim()
-        val s = t.replaceFirst(Regex("^(halo |hai |hey |hei )?jarvis[ ,]*"), "").trim()
+        var s = t.replaceFirst(Regex("^(halo |hai |hey |hei )?jarvis[ ,]*"), "").trim()
+        s = s.replaceFirst(
+            Regex("^(tolong|tolongin|coba|eh+|woi|woy|bang|min)\\s+"), ""
+        ).trim()
+        // Versi tanpa spasi: tangkap salah-dengar STT ("nya lain" -> "nyalain").
+        val c = s.replace(Regex("\\s+"), "")
+        fun has(keys: List<String>): Boolean {
+            for (k in keys) {
+                if (s.contains(k)) return true
+                val kc = k.replace(" ", "")
+                if (kc.isNotEmpty() && c.contains(kc)) return true
+            }
+            return false
+        }
         try {
             // BUKA APLIKASI
-            val open = Regex("(buka|bukain|bukakan|open|jalankan)\\s+(.+)").find(s)
-            if (open != null) {
-                var target = open.groupValues[2].replace("wasap", "whatsapp").trim()
+            if (has(listOf("buka", "open", "jalankan", "nyalain", "idupin", "hidupin")) &&
+                !has(listOf("layar", "senter", "lampu"))
+            ) {
+                var target = s.replace(
+                    Regex("(tolong|dong|coba|buka|bukain|bukakan|open|jalankan|nyalain|idupin|hidupin)"),
+                    " "
+                ).replace("wasap", "whatsapp")
+                    .replace(Regex("\\s+"), " ").trim()
                 var pkg: String? = appMap[target]
                 if (pkg == null) {
                     for ((k, v) in appMap) {
@@ -532,10 +550,9 @@ class JarvisOverlayService : Service() {
                 return
             }
             // KUNCI LAYAR
-            if (((s.contains("kunci") || s.contains("matiin") || s.contains("matikan")) &&
-                        (s.contains("layar") || s.contains("hp") || s.contains("hape"))) ||
-                s.contains("lock")
-            ) {
+            val mauKunci = (has(listOf("kunci", "matiin", "matikan")) &&
+                has(listOf("layar", "hp", "hape"))) || has(listOf("lock"))
+            if (mauKunci && !has(listOf("senter", "lampu"))) {
                 try {
                     val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE)
                         as android.app.admin.DevicePolicyManager
@@ -660,11 +677,8 @@ class JarvisOverlayService : Service() {
                         done = true
                         handler.post { speak("API key salah Sir. Buat baru ya Sir.") }
                     }
-                    // 404 = model pensiun -> lanjut ke cadangan. Selain itu berhenti.
-                    else if (code != 404) {
-                        done = true
-                        handler.post { speak("Groq gagal $code. Cek kuota ya Sir.") }
-                    }
+                    // 404/429/5xx -> coba model cadangan (kuota per model).
+                    // else if dihapus: semua non-401 lanjut ke model berikut.
                 } catch (e: Exception) {
                     lastCode = -2
                 }
