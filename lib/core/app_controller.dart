@@ -81,7 +81,6 @@ class AppController {
   static Future<String> requestLoc() => _invoke('requestLoc');
 
   // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
-  static Future<String> requestLoc() => _invoke('requestLoc');
   static Future<String> requestContacts() => _invoke('requestContacts');
   static Future<String> resolveContact(String name) =>
       _invoke('resolveContact', {'name': name});
