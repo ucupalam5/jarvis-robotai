@@ -319,9 +319,11 @@ ParsedCommand parseLocalCommand(String rawText) {
   }
 
   // --- KUNCI / MATIKAN LAYAR (senter/lampu dikecualikan) ---
-  if (((t.contains('kunci') || t.contains('matiin') || t.contains('matikan')) &&
-          (t.contains('layar') || t.contains('hp') || t.contains('hape'))) ||
-      t.contains('lock')) &&
+  final mauKunci = (t.contains('kunci') ||
+          t.contains('matiin') ||
+          t.contains('matikan')) &&
+      (t.contains('layar') || t.contains('hp') || t.contains('hape'));
+  if ((mauKunci || t.contains('lock')) &&
       !t.contains('senter') &&
       !t.contains('lampu')) {
     return ParsedCommand(
