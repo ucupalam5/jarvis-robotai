@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/groq_service.dart';
 import 'core/voice_service.dart';
 import 'ui/home_screen.dart';
+import 'ui/onboarding.dart';
 
 /// Tema layar loading. Bisa diganti di Settings > Tampilan.
 /// key prefs: loading_theme ('cyan' | 'green' | 'orange')
@@ -58,7 +61,9 @@ class _JarvisBootstrapState extends State<JarvisBootstrap> {
   final voice = VoiceService();
   GroqService? groq;
   bool ready = false;
+  bool showOnboarding = false;
   String themeKey = 'cyan';
+  String loadingBg = '';
 
   @override
   void initState() {
@@ -74,6 +79,13 @@ class _JarvisBootstrapState extends State<JarvisBootstrap> {
       final t = sp.getString('loading_theme') ?? 'cyan';
       if (loadingThemes.containsKey(t) && mounted) {
         setState(() => themeKey = t);
+      }
+      final bg = sp.getString('loading_bg') ?? '';
+      if (bg.isNotEmpty && File(bg).existsSync() && mounted) {
+        setState(() => loadingBg = bg);
+      }
+      if (mounted && !(sp.getBool('onboarded') ?? false)) {
+        setState(() => showOnboarding = true);
       }
     } catch (_) {}
     // FAILSAFE: apapun yang terjadi (STT/TTS macet di HP tertentu),
@@ -97,16 +109,38 @@ class _JarvisBootstrapState extends State<JarvisBootstrap> {
     if (mounted) setState(() => ready = true);
   }
 
+  Future<void> _finishOnboarding() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setBool('onboarded', true);
+    } catch (_) {}
+    if (mounted) setState(() => showOnboarding = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!ready) {
       final th = loadingThemes[themeKey] ?? loadingThemes['cyan']!;
+      final bgFile =
+          loadingBg.isNotEmpty ? File(loadingBg) : null;
+      final hasBg = bgFile != null && bgFile.existsSync();
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(
           backgroundColor: th['bg'],
-          body: Center(
-            child: Column(
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: hasBg
+                ? BoxDecoration(
+                    image: DecorationImage(
+                        image: FileImage(bgFile!), fit: BoxFit.cover),
+                  )
+                : null,
+            child: Container(
+              color: hasBg ? Colors.black.withOpacity(0.55) : null,
+              child: Center(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
@@ -146,7 +180,15 @@ class _JarvisBootstrapState extends State<JarvisBootstrap> {
               ],
             ),
           ),
+            ),
+          ),
         ),
+      );
+    }
+    if (showOnboarding) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: OnboardingScreen(onDone: _finishOnboarding),
       );
     }
     return HomeScreen(voice: voice, groq: groq!);

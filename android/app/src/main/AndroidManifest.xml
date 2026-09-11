@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Auto-update: install APK dari GitHub Release -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Pengingat terjadwal (coba exact, fallback biasa bila ditolak) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <!-- WAJIB Android 11+: tanpa ini, Jarvis tidak bisa melihat/membuka
@@ -142,6 +144,24 @@
             <intent-filter>
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
             </intent-filter>
+        </receiver>
+
+        <!-- Pengingat Jarvis (dijadwalkan via AlarmManager) -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Widget home screen: tap = buka + langsung dengar -->
+        <receiver
+            android:name=".JarvisWidgetProvider"
+            android:exported="false"
+            android:label="Jarvis">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/jarvis_widget_info" />
         </receiver>
     </application>
 </manifest>

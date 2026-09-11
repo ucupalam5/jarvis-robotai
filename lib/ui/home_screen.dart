@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
@@ -9,11 +10,16 @@ import '../core/overlay_service.dart';
 import '../core/update_service.dart';
 import '../core/voice_service.dart';
 import 'jarvis_orb.dart';
+import 'onboarding.dart';
 
 class ChatMsg {
   final String who; // 'user' | 'jarvis'
   final String text;
-  ChatMsg(this.who, this.text);
+  final DateTime at;
+  ChatMsg(this.who, this.text) : at = DateTime.now();
+
+  String get clock =>
+      '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
 }
 
 class HomeScreen extends StatefulWidget {
@@ -46,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _keyCheck = ''; // '' | 'ok' | 'bad:pesan'
   String _loadingTheme = 'cyan';
   String _appIcon = 'cyan';
+  String _loadingBg = '';
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -212,6 +219,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _apiCtrl.text = k;
     _loadingTheme = sp.getString('loading_theme') ?? 'cyan';
     _appIcon = sp.getString('app_icon') ?? 'cyan';
+    _loadingBg = sp.getString('loading_bg') ?? '';
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
@@ -866,6 +874,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     _handleText('mode senyap');
                   }
                 }),
+                _quick('Panduan', () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => OnboardingScreen(
+                          onDone: () => Navigator.pop(context)),
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -880,7 +897,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 final isUser = m.who == 'user';
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
+                  child: GestureDetector(
+                    onLongPress: () async {
+                      await Clipboard.setData(ClipboardData(text: m.text));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                duration: Duration(seconds: 1),
+                                content: Text('Disalin, Sir.')));
+                      }
+                    },
+                    child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     padding: const EdgeInsets.all(10),
                     constraints: BoxConstraints(
@@ -893,8 +920,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       border: Border.all(
                           color: isUser ? Colors.cyanAccent : Colors.blueGrey),
                     ),
-                    child: Text(m.text,
-                        style: const TextStyle(color: Colors.white, fontSize: 14)),
+                    child: Column(
+                      crossAxisAlignment: isUser
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!isUser)
+                          const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.smart_toy,
+                                  color: Colors.cyanAccent, size: 14),
+                              SizedBox(width: 4),
+                              Text('JARVIS',
+                                  style: TextStyle(
+                                      color: Colors.cyanAccent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        if (!isUser) const SizedBox(height: 4),
+                        Text(m.text,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 14)),
+                        const SizedBox(height: 2),
+                        Text(
+                            '${m.clock} • tahan untuk salin',
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 10)),
+                      ],
+                    ),
+                    ),
                   ),
                 );
               },
@@ -1426,6 +1483,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 4),
             const Text('Tutup-buka app 1x untuk lihat loading baru.',
                 style: TextStyle(color: Colors.white38, fontSize: 11)),
+            const SizedBox(height: 8),
+            const Text('Background loading dari galeri:',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 8),
+            StatefulBuilder(
+              builder: (c2, setB) => Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final r = await AppController.pickImage();
+                        if (r == 'BATAL') return;
+                        if (r.startsWith('/')) {
+                          final sp =
+                              await SharedPreferences.getInstance();
+                          await sp.setString('loading_bg', r);
+                          if (mounted) {
+                            setState(() => _loadingBg = r);
+                          }
+                          setB(() {});
+                        } else if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(r)));
+                        }
+                      },
+                      icon: const Icon(Icons.photo, size: 16),
+                      label: Text(
+                          _loadingBg.isEmpty
+                              ? 'Dari galeri'
+                              : 'Ganti gambar',
+                          style: const TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.cyanAccent,
+                          side: const BorderSide(
+                              color: Colors.cyanAccent)),
+                    ),
+                  ),
+                  if (_loadingBg.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Hapus background',
+                      icon: const Icon(Icons.delete_outline,
+                          color: Colors.orangeAccent),
+                      onPressed: () async {
+                        final sp =
+                            await SharedPreferences.getInstance();
+                        await sp.remove('loading_bg');
+                        if (mounted) {
+                          setState(() => _loadingBg = '');
+                        }
+                        setB(() {});
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (_loadingBg.isNotEmpty)
+              const Text('✓ Background galeri aktif.',
+                  style: TextStyle(
+                      color: Colors.greenAccent, fontSize: 12)),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () => _checkUpdate(),

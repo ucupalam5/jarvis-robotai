@@ -167,6 +167,17 @@ class MainActivity : FlutterActivity() {
                         val url = call.argument<String>("url") ?: ""
                         result.success(downloadUpdate(url))
                     }
+                    // --- Pengingat terjadwal ---
+                    "setReminder" -> {
+                        val id = (call.argument<Number>("id")?.toLong()) ?: 0L
+                        val at = (call.argument<Number>("at")?.toLong()) ?: 0L
+                        val text = call.argument<String>("text") ?: ""
+                        result.success(setReminder(id, at, text))
+                    }
+                    "cancelReminder" -> {
+                        val id = (call.argument<Number>("id")?.toLong()) ?: 0L
+                        result.success(cancelReminder(id))
+                    }
                     // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
                     "accCheck" -> result.success(accStatus())
                     "accOpenSettings" -> {
@@ -602,6 +613,56 @@ class MainActivity : FlutterActivity() {
             "OK:Mengunduh update, Sir. Installer terbuka otomatis setelah selesai."
         } catch (e: Exception) {
             "Gagal unduh update: ${e.message}"
+        }
+    }
+
+    /** Pengingat: coba exact alarm, fallback alarm biasa bila ditolak. */
+    private fun setReminder(id: Long, at: Long, text: String): String {
+        if (id == 0L || at <= System.currentTimeMillis()) {
+            return "Waktunya sudah lewat, Sir."
+        }
+        return try {
+            val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            val i = Intent(this, ReminderReceiver::class.java).apply {
+                putExtra("rid", id)
+                putExtra("text", text)
+            }
+            val pi = android.app.PendingIntent.getBroadcast(
+                this, (id % Int.MAX_VALUE).toInt(), i,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            try {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    am.setExactAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP, at, pi
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    am.setExact(android.app.AlarmManager.RTC_WAKEUP, at, pi)
+                }
+            } catch (_: SecurityException) {
+                am.set(android.app.AlarmManager.RTC_WAKEUP, at, pi)
+            }
+            "OK"
+        } catch (e: Exception) {
+            "Gagal pasang pengingat: ${e.message}"
+        }
+    }
+
+    private fun cancelReminder(id: Long): String {
+        return try {
+            val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            val i = Intent(this, ReminderReceiver::class.java)
+            val pi = android.app.PendingIntent.getBroadcast(
+                this, (id % Int.MAX_VALUE).toInt(), i,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            am.cancel(pi)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal hapus pengingat: ${e.message}"
         }
     }
 

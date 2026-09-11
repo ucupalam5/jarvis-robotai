@@ -554,9 +554,124 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
+  // --- PENGINGAT: "ingatkan minum obat dalam 10 menit" / "... jam 7 pagi" ---
+  if (s.startsWith('ingatkan ') || s.startsWith('ingetin ')) {
+    final rem = _parseReminder(s);
+    if (rem == null) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply:
+            'Sir, contohnya: ingatkan minum obat dalam 10 menit. Atau: ingatkan rapat jam 7 pagi.',
+      );
+    }
+    final at = rem['at'] as int;
+    final body = rem['text'] as String;
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Memasang pengingat, Sir.',
+      action: () async {
+        final id = DateTime.now().millisecondsSinceEpoch;
+        final r = await AppController.setReminder(id, at, body);
+        if (r != 'OK') return 'SAY:$r';
+        final sp = await SharedPreferences.getInstance();
+        final list = sp.getStringList('jarvis_reminders') ?? [];
+        list.add('$id|$at|$body');
+        await sp.setStringList('jarvis_reminders', list);
+        final when = DateTime.fromMillisecondsSinceEpoch(at);
+        final hh = when.hour.toString().padLeft(2, '0');
+        final mm = when.minute.toString().padLeft(2, '0');
+        return 'SAY:Siap Sir, diingatkan "$body" jam $hh lewat $mm.';
+      },
+    );
+  }
+  if (has(['lihat pengingat', 'baca pengingat', 'daftar pengingat'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek pengingat, Sir.',
+      action: () async {
+        final sp = await SharedPreferences.getInstance();
+        final list = sp.getStringList('jarvis_reminders') ?? [];
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final aktif =
+            list.where((e) => (int.tryParse(e.split('|').first) ?? 0) > 0).toList();
+        if (aktif.isEmpty) return 'SAY:Tidak ada pengingat aktif, Sir.';
+        final isi = aktif.map((e) {
+          final p = e.split('|');
+          final when =
+              DateTime.fromMillisecondsSinceEpoch(int.tryParse(p[1]) ?? now);
+          final hh = when.hour.toString().padLeft(2, '0');
+          final mm = when.minute.toString().padLeft(2, '0');
+          return '${p.length > 2 ? p.sublist(2).join('|') : ''} jam $hh:$mm';
+        }).join('. ');
+        return 'SAY:Pengingat Sir: $isi.';
+      },
+    );
+  }
+  if (has(['hapus pengingat', 'batal pengingat'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menghapus pengingat, Sir.',
+      action: () async {
+        final sp = await SharedPreferences.getInstance();
+        final list = sp.getStringList('jarvis_reminders') ?? [];
+        for (final e in list) {
+          final id = int.tryParse(e.split('|').first) ?? 0;
+          if (id > 0) await AppController.cancelReminder(id);
+        }
+        await sp.remove('jarvis_reminders');
+        return 'SAY:Semua pengingat dihapus, Sir.';
+      },
+    );
+  }
+
   // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---
   return ParsedCommand(handledLocally: false, reply: '');
 }
+
+/// Parse "ingatkan X dalam N menit/jam" atau "ingatkan X jam H[:M] pagi..".
+/// Return {'at': millis, 'text': ...} atau null.
+Map<String, dynamic>? _parseReminder(String s) {
+  var rest = s
+      .replaceFirst(RegExp(r'^(ingatkan|ingetin)\s+'), '')
+      .trim();
+  if (rest.isEmpty) return null;
+  final now = DateTime.now();
+  // Pola 1: ... dalam 10 menit / 2 jam
+  final dalam =
+      RegExp(r'dalam\s+(\d+)\s*(menit|mnt|jam)').firstMatch(rest);
+  if (dalam != null) {
+    final n = int.parse(dalam.group(1)!);
+    final unit = dalam.group(2)!;
+    final at = now.add(
+        unit.startsWith('jam') ? Duration(hours: n) : Duration(minutes: n));
+    final body = rest.replaceFirst(dalam.group(0)!, '').trim();
+    if (body.isEmpty) return null;
+    return {'at': at.millisecondsSinceEpoch, 'text': _cap(body)};
+  }
+  // Pola 2: ... jam 7 [pagi/siang/sore/malam] / jam 7:30
+  final jam =
+      RegExp(r'jam\s+(\d{1,2})(?:[:.](\d{2}))?\s*(pagi|siang|sore|malam)?')
+          .firstMatch(rest);
+  if (jam != null) {
+    var h = int.parse(jam.group(1)!);
+    final m = jam.group(2) != null ? int.parse(jam.group(2)!) : 0;
+    final suf = jam.group(3) ?? '';
+    if ((suf == 'siang' || suf == 'sore' || suf == 'malam') && h < 12) {
+      h += 12;
+    }
+    if (suf == 'pagi' && h == 12) h = 0;
+    if (h > 23 || m > 59) return null;
+    var at = DateTime(now.year, now.month, now.day, h, m);
+    if (!at.isAfter(now)) at = at.add(const Duration(days: 1));
+    final body = rest.replaceFirst(jam.group(0)!, '').trim();
+    if (body.isEmpty) return null;
+    return {'at': at.millisecondsSinceEpoch, 'text': _cap(body)};
+  }
+  return null;
+}
+
+String _cap(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
 /// Evaluator aritmetika mini (+ - * / dan kurung, koma desimal).
 /// Return hasil format Indonesia, atau null bila tak bisa diparse.

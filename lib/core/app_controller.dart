@@ -68,6 +68,12 @@ class AppController {
   static Future<String> downloadUpdate(String url) =>
       _invoke('downloadUpdate', {'url': url});
 
+  // --- Pengingat terjadwal ---
+  static Future<String> setReminder(int id, int at, String text) =>
+      _invoke('setReminder', {'id': id, 'at': at, 'text': text});
+  static Future<String> cancelReminder(int id) =>
+      _invoke('cancelReminder', {'id': id});
+
   // --- Otomatisasi via Accessibility (tanpa root/aplikasi tambahan) ---
   static Future<String> accCheck() => _invoke('accCheck');
   static Future<String> accOpenSettings() => _invoke('accOpenSettings');
