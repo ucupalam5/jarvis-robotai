@@ -5,6 +5,9 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.DownloadManager
 import android.app.admin.DevicePolicyManager
+import android.app.AppOpsManager
+import android.app.role.RoleManager
+import android.app.usage.UsageStatsManager
 import android.bluetooth.BluetoothAdapter
 import android.content.ContentValues
 import android.content.ComponentName
@@ -61,6 +64,8 @@ class MainActivity : FlutterActivity() {
     private var locResult: MethodChannel.Result? = null
     private val BT_REQ = 2008
     private var btResult: MethodChannel.Result? = null
+    private var roleResult: MethodChannel.Result? = null
+    private var roleResult: MethodChannel.Result? = null
     private val REC_REQ = 2009
     private var recResult: MethodChannel.Result? = null
     private var mediaProjection: MediaProjection? = null
@@ -204,6 +209,89 @@ class MainActivity : FlutterActivity() {
                     // --- SMS darurat + lokasi (find-my-phone) ---
                     "requestSms" -> requestSms(result)
                     "requestLoc" -> requestLoc(result)
+                    // --- Kuasa tulis pengaturan (kecerahan, timeout, rotasi) ---
+                    "writeCheck" -> result.success(writeStatus())
+                    "writeRequest" -> {
+                        try {
+                            val i = Intent(
+                                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                Uri.parse("package:$packageName")
+                            )
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(i)
+                            result.success("OK")
+                        } catch (e: Exception) {
+                            result.success("Gagal buka halaman: ${e.message}")
+                        }
+                    }
+                    "setBrightness" -> {
+                        val v = call.argument<Int>("level") ?: -1
+                        result.success(setBrightness(v))
+                    }
+                    "setScreenTimeout" -> {
+                        val ms = (call.argument<Number>("ms")?.toLong()) ?: 0L
+                        result.success(setScreenTimeout(ms))
+                    }
+                    "setRotation" -> {
+                        val on = call.argument<Boolean>("on") ?: true
+                        result.success(setRotation(on))
+                    }
+                    // --- Kuasa statistik pakai (screen time) ---
+                    "usageCheck" -> result.success(usageStatus())
+                    "usageRequest" -> {
+                        try {
+                            val i = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(i)
+                            result.success("OK")
+                        } catch (e: Exception) {
+                            result.success("Gagal buka halaman: ${e.message}")
+                        }
+                    }
+                    "usageToday" -> result.success(usageToday())
+                    // --- Kuasa abaikan optimasi baterai (anti dibunuh sistem) ---
+                    "batteryCheck" -> result.success(batteryStatus())
+                    "batteryRequest" -> {
+                        try {
+                            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                            if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                                result.success("OK")
+                            } else {
+                                val i = Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.parse("package:$packageName")
+                                )
+                                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(i)
+                                result.success("OK")
+                            }
+                        } catch (e: Exception) {
+                            result.success("Gagal: ${e.message}")
+                        }
+                    }
+                    // --- Kuasa DND (mode hening dijamin walau DND aktif) ---
+                    "dndCheck" -> result.success(dndStatus())
+                    "dndRequest" -> {
+                        try {
+                            val nm = getSystemService(Context.NOTIFICATION_SERVICE)
+                                as android.app.NotificationManager
+                            if (nm.isNotificationPolicyAccessGranted) {
+                                result.success("OK")
+                            } else {
+                                val i = Intent(
+                                    Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS
+                                )
+                                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(i)
+                                result.success("OK")
+                            }
+                        } catch (e: Exception) {
+                            result.success("Gagal: ${e.message}")
+                        }
+                    }
+                    // --- Asisten default (tombol power panggil Jarvis) ---
+                    "assistCheck" -> result.success(assistStatus())
+                    "assistRequest" -> assistRequest(result)
                     // --- Kontak: izin + cari nomor dari nama ---
                     "requestContacts" -> requestContacts(result)
                     "resolveContact" -> {
@@ -1240,6 +1328,183 @@ class MainActivity : FlutterActivity() {
         val r = NotifStore.replyTo(target, text)
         if (r.startsWith("OK:")) return "OK:Terkirim ke ${r.substring(3)}, Sir."
         return r
+    }
+
+    private fun writeStatus(): String {
+        return try {
+            if (Settings.System.canWrite(this)) "OK"
+            else "BELUM: tap untuk buka halaman izin tulis pengaturan ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    /** Kecerahan 0-100 (paksa mode manual dulu). */
+    private fun setBrightness(level: Int): String {
+        if (level !in 0..100) return "Level 0-100 ya Sir."
+        return try {
+            if (!Settings.System.canWrite(this)) {
+                return "BELUM_IZIN:Aktifkan dulu di Pusat Kekuasaan > Tulis Pengaturan ya Sir."
+            }
+            val cr = contentResolver
+            Settings.System.putInt(
+                cr, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            Settings.System.putInt(
+                cr, Settings.System.SCREEN_BRIGHTNESS,
+                (level * 255 / 100).coerceIn(1, 255)
+            )
+            "OK"
+        } catch (e: Exception) {
+            "Gagal atur cerah: ${e.message}"
+        }
+    }
+
+    /** Timeout layar mati otomatis (milidetik). */
+    private fun setScreenTimeout(ms: Long): String {
+        if (ms < 15000) return "Minimal 15 detik ya Sir (aturan Android)."
+        return try {
+            if (!Settings.System.canWrite(this)) {
+                return "BELUM_IZIN:Aktifkan dulu di Pusat Kekuasaan > Tulis Pengaturan ya Sir."
+            }
+            Settings.System.putLong(
+                contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, ms
+            )
+            "OK"
+        } catch (e: Exception) {
+            "Gagal atur timeout: ${e.message}"
+        }
+    }
+
+    /** Putar layar otomatis nyala/mati. */
+    private fun setRotation(on: Boolean): String {
+        return try {
+            if (!Settings.System.canWrite(this)) {
+                return "BELUM_IZIN:Aktifkan dulu di Pusat Kekuasaan > Tulis Pengaturan ya Sir."
+            }
+            Settings.System.putInt(
+                contentResolver, Settings.System.ACCELEROMETER_ROTATION,
+                if (on) 1 else 0
+            )
+            "OK"
+        } catch (e: Exception) {
+            "Gagal atur rotasi: ${e.message}"
+        }
+    }
+
+    private fun usageStatus(): String {
+        return try {
+            val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+            val mode = ops.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(), packageName
+            )
+            if (mode == AppOpsManager.MODE_ALLOWED) "OK"
+            else "BELUM: tap untuk buka halaman Akses Penggunaan ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    /** 3 app terlama hari ini: "Label|jam|menit;...". */
+    private fun usageToday(): String {
+        return try {
+            if (usageStatus() != "OK") {
+                return "BELUM_IZIN:Aktifkan dulu di Pusat Kekuasaan > Akses Penggunaan ya Sir."
+            }
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE)
+                as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            val list = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, cal.timeInMillis, now
+            ) ?: return "NONE:belum ada data hari ini"
+            val top = list
+                .filter { it.totalTimeInForeground > 60000 }
+                .sortedByDescending { it.totalTimeInForeground }
+                .take(3)
+            if (top.isEmpty()) return "NONE:belum ada data hari ini"
+            top.joinToString(";") { u ->
+                var label = u.packageName
+                try {
+                    label = packageManager.getApplicationLabel(
+                        packageManager.getApplicationInfo(u.packageName, 0)
+                    ).toString()
+                } catch (_: Exception) {}
+                val mins = (u.totalTimeInForeground / 60000).toInt()
+                "$label|${mins / 60}|${mins % 60}"
+            }
+        } catch (e: Exception) {
+            "Gagal baca statistik: ${e.message}"
+        }
+    }
+
+    private fun batteryStatus(): String {
+        return try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (pm.isIgnoringBatteryOptimizations(packageName)) "OK"
+            else "BELUM: tap agar Jarvis tidak dibunuh sistem saat standby ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    private fun dndStatus(): String {
+        return try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE)
+                as android.app.NotificationManager
+            if (nm.isNotificationPolicyAccessGranted) "OK"
+            else "BELUM: tap agar mode hening dijamin walau DND aktif ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    private fun assistStatus(): String {
+        return try {
+            if (Build.VERSION.SDK_INT < 29) {
+                return "MANUAL:atur di Settings > Apps > Default apps > Asisten ya Sir."
+            }
+            val rm = getSystemService(RoleManager::class.java)
+            if (rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) "OK"
+            else "BELUM:tap agar tombol power memanggil Jarvis ya Sir."
+        } catch (e: Exception) {
+            "Gagal cek: ${e.message}"
+        }
+    }
+
+    private fun assistRequest(result: MethodChannel.Result) {
+        try {
+            if (Build.VERSION.SDK_INT < 29) {
+                val i = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                result.success("OK")
+                return
+            }
+            val rm = getSystemService(RoleManager::class.java)
+            if (rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+                result.success("OK")
+                return
+            }
+            roleResult = result
+            rm.requestRole(
+                RoleManager.ROLE_ASSISTANT, mainExecutor,
+                java.util.function.Consumer<Boolean> { granted ->
+                    val r = roleResult
+                    roleResult = null
+                    if (r == null) return@Consumer
+                    if (granted) r.success("OK")
+                    else r.success("Ditolak sistem. Atur manual: Settings > Apps > Default apps > Asisten digital ya Sir.")
+                }
+            )
+        } catch (e: Exception) {
+            result.success("Gagal: ${e.message}")
+        }
     }
 
     /** Daftar app ber-launcher "label|package" per baris, urut A-Z. */

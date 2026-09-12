@@ -80,6 +80,25 @@ class AppController {
   static Future<String> requestSms() => _invoke('requestSms');
   static Future<String> requestLoc() => _invoke('requestLoc');
 
+  // --- Kuasa penuh: tulis pengaturan, statistik, baterai, DND, asisten ---
+  static Future<String> writeCheck() => _invoke('writeCheck');
+  static Future<String> writeRequest() => _invoke('writeRequest');
+  static Future<String> setBrightness(int level) =>
+      _invoke('setBrightness', {'level': level});
+  static Future<String> setScreenTimeout(int ms) =>
+      _invoke('setScreenTimeout', {'ms': ms});
+  static Future<String> setRotation(bool on) =>
+      _invoke('setRotation', {'on': on});
+  static Future<String> usageCheck() => _invoke('usageCheck');
+  static Future<String> usageRequest() => _invoke('usageRequest');
+  static Future<String> usageToday() => _invoke('usageToday');
+  static Future<String> batteryCheck() => _invoke('batteryCheck');
+  static Future<String> batteryRequest() => _invoke('batteryRequest');
+  static Future<String> dndCheck() => _invoke('dndCheck');
+  static Future<String> dndRequest() => _invoke('dndRequest');
+  static Future<String> assistCheck() => _invoke('assistCheck');
+  static Future<String> assistRequest() => _invoke('assistRequest');
+
   // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
   static Future<String> requestContacts() => _invoke('requestContacts');
   static Future<String> resolveContact(String name) =>

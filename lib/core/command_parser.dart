@@ -933,6 +933,86 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
+  // --- KECERAHAN: "redupkan layar" / "terang maksimal" / "kecerahan 50" ---
+  if (has(['redupkan layar', 'gelapkan layar', 'redup layar'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Layar diredupkan, Sir.',
+      action: () => AppController.setBrightness(25),
+    );
+  }
+  if (has(['terang maksimal', 'cerah maksimal', 'terangkan layar', 'cerahkan layar'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Layar dicerahkan maksimal, Sir.',
+      action: () => AppController.setBrightness(100),
+    );
+  }
+  final cerahM = RegExp(r'kecerahan\s+(\d{1,3})').firstMatch(s);
+  if (cerahM != null) {
+    var v = int.parse(cerahM.group(1)!);
+    if (v > 100) v = 100;
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Kecerahan $v persen, Sir.',
+      action: () => AppController.setBrightness(v),
+    );
+  }
+
+  // --- TIMEOUT LAYAR: "layar mati 5 menit" / "layar mati 30 detik" ---
+  final toM = RegExp(r'layar mati\s+(\d+)\s*(menit|detik|jam)').firstMatch(s);
+  if (toM != null) {
+    final n = int.parse(toM.group(1)!);
+    final unit = toM.group(2)!;
+    final ms = unit.startsWith('jam')
+        ? n * 3600000
+        : unit.startsWith('menit')
+            ? n * 60000
+            : n * 1000;
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Layar mati otomatis tiap $n $unit, Sir.',
+      action: () => AppController.setScreenTimeout(ms),
+    );
+  }
+
+  // --- ROTASI OTOMATIS: "putar otomatis nyala/mati" ---
+  if (has(['putar otomatis', 'rotasi otomatis'])) {
+    final on = !(has(['mati', 'matikan', 'matiin', 'off']));
+    return ParsedCommand(
+      handledLocally: true,
+      reply: on ? 'Putar otomatis nyala, Sir.' : 'Putar otomatis mati, Sir.',
+      action: () => AppController.setRotation(on),
+    );
+  }
+
+  // --- SCREEN TIME: "main apa aja" / "waktu layar" ---
+  if (has(['waktu layar', 'screen time', 'pemakaian hp', 'main apa aja',
+      'aplikasi terlama', 'paling lama dibuka'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek pemakaian, Sir.',
+      action: () async {
+        final r = await AppController.usageToday();
+        if (r.startsWith('BELUM_IZIN:')) {
+          return 'SAY:${r.substring('BELUM_IZIN:'.length)}';
+        }
+        if (r.startsWith('NONE:')) return 'SAY:Belum ada data hari ini, Sir.';
+        if (r.startsWith('ERR:') || r.contains('Gagal')) return 'SAY:$r';
+        final parts = r.split(';').where((e) => e.contains('|')).toList();
+        if (parts.isEmpty) return 'SAY:Belum ada data hari ini, Sir.';
+        final isi = parts.map((e) {
+          final p = e.split('|');
+          final h = int.tryParse(p.length > 1 ? p[1] : '0') ?? 0;
+          final m = int.tryParse(p.length > 2 ? p[2] : '0') ?? 0;
+          final dur = h > 0 ? '$h jam $m menit' : '$m menit';
+          return '${p[0]} $dur';
+        }).join(', ');
+        return 'SAY:Hari ini paling lama: $isi, Sir. Jangan lupa istirahat.';
+      },
+    );
+  }
+
   // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---
   return ParsedCommand(handledLocally: false, reply: '');
 }

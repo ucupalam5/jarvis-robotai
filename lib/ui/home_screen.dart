@@ -13,6 +13,7 @@ import '../core/update_service.dart';
 import '../core/voice_service.dart';
 import 'jarvis_orb.dart';
 import 'onboarding.dart';
+import 'power_screen.dart';
 
 class ChatMsg {
   final String who; // 'user' | 'jarvis'
@@ -797,6 +798,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             style: TextStyle(color: Colors.cyanAccent, letterSpacing: 1.2)),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.shield, color: Colors.cyanAccent),
+            tooltip: 'Pusat Kekuasaan (semua izin)',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PowerScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.picture_in_picture, color: Colors.cyanAccent),
             tooltip: 'Popup robot',
