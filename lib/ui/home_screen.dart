@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
 import '../core/groq_service.dart';
+import '../core/memory_service.dart';
 import '../core/overlay_service.dart';
 import '../core/update_service.dart';
 import '../core/voice_service.dart';
@@ -641,8 +642,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       reply =
           'Sir, lagi offline. Perintah HP (buka app, kunci, senter, hitung, catat) tetap jalan. AI butuh internet ya Sir.';
     } else {
-      // 2) Selain itu -> tanya ke Groq AI.
-      reply = await widget.groq.chat(text, _history);
+      // 2) Selain itu -> tanya ke Groq AI + memori jangka panjang.
+      final mem = await MemoryService.summary();
+      reply = await widget.groq.chat(text, _history, memory: mem);
       _history.add({'role': 'user', 'content': text});
       _history.add({'role': 'assistant', 'content': reply});
     }

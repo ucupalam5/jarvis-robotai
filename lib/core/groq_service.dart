@@ -52,12 +52,16 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
     }
   }
 
-  Future<String> chat(String userText, List<Map<String, String>> history) async {
+  Future<String> chat(String userText, List<Map<String, String>> history,
+      {String memory = ''}) async {
     if (apiKey.isEmpty) {
       return 'Sir, Groq API key belum dipasang. Masukkan di Settings ya Sir.';
     }
+    final sys = memory.isEmpty
+        ? systemPrompt
+        : '$systemPrompt\nFakta tentang user (pakai bila relevan):\n$memory';
     final messages = <Map<String, String>>[
-      {'role': 'system', 'content': systemPrompt},
+      {'role': 'system', 'content': sys},
       ...history.takeLast(10),
       {'role': 'user', 'content': userText},
     ];

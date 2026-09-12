@@ -1,6 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_controller.dart';
+import 'memory_service.dart';
+import 'overlay_service.dart';
 
 /// Hasil parsing perintah suara -> aksi lokal atau lempar ke AI.
 class ParsedCommand {
@@ -90,6 +92,117 @@ ParsedCommand parseLocalCommand(String rawText) {
       if (kc.isNotEmpty && c.contains(kc)) return true;
     }
     return false;
+  }
+
+  // --- POPUP via voice: "tutup popup" / "buka popup" (paling awal!) ---
+  if (has(['tutup popup', 'popup mati', 'sembunyikan popup',
+      'hilangkan popup', 'matikan popup'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Popup ditutup, Sir. Panggil lagi dari app bila perlu.',
+      action: () => OverlayService.hide().then((_) => 'OK'),
+    );
+  }
+  if (has(['buka popup', 'tampilkan popup', 'munculkan popup',
+      'popup nyala', 'panggil popup'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menampilkan popup, Sir.',
+      action: () async {
+        final ok = await OverlayService.show();
+        return ok ? 'OK' : 'SAY:Popup gagal tampil. Aktifkan: Settings HP > Apps > JARVIS > Display over other apps > Allow.';
+      },
+    );
+  }
+
+  // --- MEMORI: "inget ya ..." / "lupakan ..." / "apa yang kamu ingat" ---
+  if (s.startsWith('inget ') ||
+      s.startsWith('ingat ') ||
+      s.startsWith('inget ya ') ||
+      s.startsWith('ingat ya ')) {
+    var body = rawText
+        .replaceFirst(RegExp(r'(?i)^(inget|ingat)(\s+ya)?\s+'), '')
+        .trim();
+    if (body.isEmpty) {
+      return ParsedCommand(
+          handledLocally: true,
+          reply: 'Mau saya ingat apa, Sir? Contoh: inget ya wifi rumah adalah Kopi123.');
+    }
+    String key;
+    String value;
+    final m = RegExp(r'^(.*?)\s+(adalah|ialah|=|:)\s+(.+)$')
+        .firstMatch(body);
+    if (m != null) {
+      key = m.group(1)!.trim();
+      value = m.group(3)!.trim();
+    } else {
+      key = 'catatan ${DateTime.now().millisecondsSinceEpoch % 100000}';
+      value = body;
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencatat ingatan, Sir.',
+      action: () async {
+        await MemoryService.remember(key, value);
+        return 'SAY:Siap Sir, saya ingat: $key = $value.';
+      },
+    );
+  }
+  if (has(['lupakan ', 'lupa ']) &&
+      (s.startsWith('lupakan') || s.startsWith('lupa '))) {
+    final q = s
+        .replaceFirst(RegExp(r'^(lupakan|lupa)\s+'), '')
+        .trim();
+    if (q.isEmpty) {
+      return ParsedCommand(
+          handledLocally: true, reply: 'Lupakan apa, Sir?');
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Melupakan, Sir.',
+      action: () async {
+        final ok = await MemoryService.forget(q);
+        return ok
+            ? 'SAY:Sudah saya lupakan soal $q, Sir.'
+            : 'SAY:Tidak ada ingatan soal $q, Sir.';
+      },
+    );
+  }
+  if (has(['apa yang kamu ingat', 'apa yang kau ingat', 'ingat apa saja',
+      'lihat ingatan', 'baca ingatan'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek ingatan, Sir.',
+      action: () async {
+        final list = await MemoryService.load();
+        if (list.isEmpty) {
+          return 'SAY:Belum ada yang saya ingat, Sir. Bilang "inget ya ..." dulu.';
+        }
+        final isi = list
+            .take(8)
+            .map((e) => '${e['k']}: ${e['v']}')
+            .join('. ');
+        return 'SAY:Yang saya ingat, Sir: $isi.';
+      },
+    );
+  }
+
+  // --- APLIKASI SEBELUMNYA: "buka yang tadi" (sebelum blok buka!) ---
+  if (has([
+    'aplikasi sebelumnya', 'app sebelumnya', 'yang tadi',
+    'terakhir dibuka', 'buka lagi'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka yang tadi, Sir.',
+      action: () async {
+        final r = await AppController.openLastApp();
+        if (r.startsWith('OK_MAKSUD:')) {
+          return 'SAY:Membuka ${r.substring('OK_MAKSUD:'.length)} lagi, Sir.';
+        }
+        return r;
+      },
+    );
   }
 
   // --- BUKA APLIKASI: "buka whatsapp", "nyalain spotify", "bukain ig dong" ---

@@ -294,6 +294,8 @@ class MainActivity : FlutterActivity() {
                     "assistRequest" -> assistRequest(result)
                     // --- Remote Telegram: nyalakan/matikan service polling ---
                     "tgRestart" -> result.success(tgRestart())
+                    // --- Buka aplikasi sebelumnya ---
+                    "openLastApp" -> result.success(openLastApp())
                     // --- Kontak: izin + cari nomor dari nama ---
                     "requestContacts" -> requestContacts(result)
                     "resolveContact" -> {
@@ -447,6 +449,7 @@ class MainActivity : FlutterActivity() {
                 if (intent != null) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(intent)
+                    noteLastApp(found.second, found.first)
                     // Tandai bila yang dibuka hasil tebakan cerdas.
                     val exact = found.first.equals(keyword, ignoreCase = true) ||
                         found.second.equals(keyword, ignoreCase = true)
@@ -691,6 +694,42 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal buka halaman admin: ${e.message}"
+        }
+    }
+
+    /** Catat app terakhir (untuk "buka yang tadi"). */
+    private fun noteLastApp(pkg: String, label: String) {
+        try {
+            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .edit().putString("last_app_pkg", pkg)
+                .putString("last_app_label", label).apply()
+        } catch (_: Exception) {}
+    }
+
+    /** Buka lagi aplikasi yang terakhir dibuka. */
+    private fun openLastApp(): String {
+        return try {
+            val sp = getSharedPreferences(
+                "FlutterSharedPreferences", Context.MODE_PRIVATE
+            )
+            val pkg = sp.getString("last_app_pkg", "")
+                ?: sp.getString("flutter.last_app_pkg", "") ?: ""
+            val label = sp.getString("last_app_label", "")
+                ?: sp.getString("flutter.last_app_label", "") ?: ""
+            if (pkg.isEmpty()) {
+                return "Belum ada aplikasi yang dibuka, Sir."
+            }
+            // Jangan buka diri sendiri (loop tak berguna).
+            if (pkg == packageName) {
+                return "Itu aplikasi Jarvis sendiri, Sir. Sudah terbuka."
+            }
+            val i = packageManager.getLaunchIntentForPackage(pkg)
+            if (i == null) return "Aplikasi $label tidak ada lagi."
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK_MAKSUD:$label"
+        } catch (e: Exception) {
+            "Gagal buka lagi: ${e.message}"
         }
     }
 

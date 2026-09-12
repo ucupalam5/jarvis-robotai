@@ -517,8 +517,7 @@ class JarvisOverlayService : Service() {
         "tokopedia" to "com.tokopedia.tkpd", "toped" to "com.tokopedia.tkpd"
     )
 
-    private fun handleVoiceCommand(raw: String) {
-        val t = raw.lowercase().trim()
+    private fun handleVoiceCommand(raw: String) {        val t = raw.lowercase().trim()
         var s = t.replaceFirst(Regex("^(halo |hai |hey |hei )?jarvis[ ,]*"), "").trim()
         s = s.replaceFirst(
             Regex("^(tolong|tolongin|coba|eh+|woi|woy|bang|min)\\s+"), ""
@@ -534,6 +533,22 @@ class JarvisOverlayService : Service() {
             return false
         }
         try {
+            // TUTUP POPUP via voice (tanpa sentuh).
+            if (has(
+                    listOf(
+                        "tutup popup", "popup mati", "sembunyikan popup",
+                        "hilangkan popup", "matikan popup"
+                    )
+                )
+            ) {
+                speak("Siap Sir, popup tutup.")
+                handler.postDelayed({
+                    try {
+                        stopSelf()
+                    } catch (_: Exception) {}
+                }, 1200)
+                return
+            }
             // BUKA APLIKASI (layar/hp/hape/alarm = perintah daya/jam, BUKAN app)
             if (has(listOf("buka", "open", "jalankan", "nyalain", "idupin", "hidupin")) &&
                 !has(listOf("layar", "hp", "hape", "handphone", "alarm", "senter", "lampu"))
@@ -566,11 +581,44 @@ class JarvisOverlayService : Service() {
                     if (i != null) {
                         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         startActivity(i)
+                        try {
+                            prefs().edit()
+                                .putString("last_app_pkg", pkg)
+                                .putString("last_app_label", target).apply()
+                        } catch (_: Exception) {}
                         speak("Membuka $target, Sir.")
                         return
                     }
                 }
                 speak("Aplikasi $target tidak ketemu, Sir.")
+                return
+            }
+            // APLIKASI SEBELUMNYA: "buka yang tadi".
+            if (has(
+                    listOf(
+                        "aplikasi sebelumnya", "app sebelumnya", "yang tadi",
+                        "terakhir dibuka", "buka lagi"
+                    )
+                )
+            ) {
+                val pkg = pref("last_app_pkg", "")
+                val label = pref("last_app_label", "")
+                if (pkg.isEmpty() || pkg == packageName) {
+                    speak("Belum ada aplikasi sebelumnya, Sir.")
+                    return
+                }
+                try {
+                    val i = packageManager.getLaunchIntentForPackage(pkg)
+                    if (i == null) {
+                        speak("Aplikasi $label tidak ada lagi.")
+                        return
+                    }
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    speak("Membuka $label lagi, Sir.")
+                } catch (_: Exception) {
+                    speak("Gagal buka lagi.")
+                }
                 return
             }
             // TUTUP / HOME
@@ -1316,6 +1364,27 @@ class JarvisOverlayService : Service() {
         }.start()
     }
 
+    /** Ringkasan memori (maks 10 fakta, 800 char) untuk konteks AI. */
+    private fun memorySummary(): String {
+        return try {
+            val raw = pref("jarvis_memory", "")
+            if (raw.isBlank()) return ""
+            val arr = org.json.JSONArray(raw)
+            val sb = StringBuilder()
+            var len = 0
+            for (i in 0 until minOf(arr.length(), 10)) {
+                val o = arr.getJSONObject(i)
+                val line = "- ${o.optString("k")}: ${o.optString("v")}\n"
+                if (len + line.length > 800) break
+                sb.append(line)
+                len += line.length
+            }
+            sb.toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     private fun groqAsk(userText: String) {
         val key = pref("groq_key", "")
         if (key.isEmpty() || key.contains("GANTI")) {
@@ -1344,9 +1413,13 @@ class JarvisOverlayService : Service() {
                     c.doOutput = true
                     c.setRequestProperty("Content-Type", "application/json")
                     c.setRequestProperty("Authorization", "Bearer $key")
-                    val sys = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
+                    val sysBase = "Kamu JARVIS, asisten RobotAI ala Iron Man. " +
                         "WAJIB SELALU jawab Bahasa Indonesia (campur Inggris santai). " +
                         "JANGAN PERNAH jawab full Inggris. Singkat maks 2 kalimat, panggil user Sir."
+                    // Memori jangka panjang (sama seperti di app).
+                    val mem = memorySummary()
+                    val sys = if (mem.isEmpty()) sysBase
+                    else "$sysBase\nFakta tentang user:\n$mem"
                     val body = JSONObject()
                         .put("model", model)
                         .put("temperature", 0.7)

@@ -193,8 +193,66 @@ class TgPollService : Service() {
         return out
     }
 
-    private fun tgSend(token: String, chat: String, text: String) {
-        try {
+    /** Screenshot layar lalu kirim sebagai foto Telegram. */
+    private fun tgShot(token: String, chat: String) {
+        tgSend(token, chat, "Siap Sir, menangkap layar...")
+        JarvisAccessibilityService.screenshot { r ->
+            if (r.startsWith("ERR:")) {
+                tgSend(token, chat, "Jarvis: ${r.removePrefix("ERR:")}")
+                return@screenshot
+            }
+            Thread {
+                try {
+                    val bytes = java.io.File(r).readBytes()
+                    if (bytes.size > 8 * 1024 * 1024) {
+                        tgSend(token, chat, "Jarvis: gambar terlalu besar.")
+                        return@Thread
+                    }
+                    val boundary = "Jarvis${System.currentTimeMillis()}"
+                    val url = java.net.URL(
+                        "https://api.telegram.org/bot$token/sendPhoto"
+                    )
+                    val c = url.openConnection()
+                        as javax.net.ssl.HttpsURLConnection
+                    c.requestMethod = "POST"
+                    c.connectTimeout = 20000
+                    c.readTimeout = 60000
+                    c.doOutput = true
+                    c.setRequestProperty(
+                        "Content-Type", "multipart/form-data; boundary=$boundary"
+                    )
+                    c.outputStream.use { o ->
+                        val w = o.bufferedWriter(Charsets.UTF_8)
+                        w.write("--$boundary\r\n")
+                        w.write(
+                            "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
+                        )
+                        w.write("$chat\r\n")
+                        w.write("--$boundary\r\n")
+                        w.write(
+                            "Content-Disposition: form-data; name=\"photo\"; " +
+                                "filename=\"layar.jpg\"\r\n"
+                        )
+                        w.write("Content-Type: image/jpeg\r\n\r\n")
+                        w.flush()
+                        o.write(bytes)
+                        o.flush()
+                        w.write("\r\n--$boundary--\r\n")
+                        w.flush()
+                    }
+                    val code = c.responseCode
+                    c.inputStream.use { it.readBytes() }
+                    if (code != 200) {
+                        tgSend(token, chat, "Jarvis: kirim foto gagal ($code).")
+                    }
+                } catch (_: Exception) {
+                    tgSend(token, chat, "Jarvis: kirim foto gagal.")
+                }
+            }.start()
+        }
+    }
+
+    private fun tgSend(token: String, chat: String, text: String) {        try {
             val url = java.net.URL(
                 "https://api.telegram.org/bot$token/sendMessage"
             )
@@ -240,11 +298,12 @@ class TgPollService : Service() {
             }
             "STATUS", "START", "HALO", "HAI", "PING" -> tgSend(
                 token, chat,
-                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / BATERAI / JAM."
+                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / SHOT / BATERAI / JAM."
             )
+            "SHOT", "FOTO", "SCREENSHOT", "SS" -> tgShot(token, chat)
             else -> tgSend(
                 token, chat,
-                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / BATERAI / JAM."
+                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / SHOT / BATERAI / JAM."
             )
         }
     }

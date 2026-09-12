@@ -19,6 +19,7 @@ class AppController {
 
   static Future<String> openApp(String keyword) =>
       _invoke('openApp', {'keyword': keyword});
+  static Future<String> openLastApp() => _invoke('openLastApp');
   static Future<String> closeApp() => _invoke('closeApp');
   static Future<String> goHome() => _invoke('goHome');
   static Future<String> lockScreen() => _invoke('lockScreen');
