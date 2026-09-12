@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 /// PENTING: samakan kAppVersion dengan pubspec + tag release terbaru
 /// setiap kali rilis, kalau tidak app akan tawarkan update ke diri sendiri.
 class UpdateService {
-  static const String kAppVersion = '1.8.0';
+  static const String kAppVersion = '1.9.0';
   static const String kRepo = 'ucupalam5/jarvis-robotai';
   static const String _latestUrl =
       'https://api.github.com/repos/$kRepo/releases/latest';
