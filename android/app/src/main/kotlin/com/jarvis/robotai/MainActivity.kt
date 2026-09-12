@@ -64,7 +64,6 @@ class MainActivity : FlutterActivity() {
     private var locResult: MethodChannel.Result? = null
     private val BT_REQ = 2008
     private var btResult: MethodChannel.Result? = null
-    private var roleResult: MethodChannel.Result? = null
     private val REC_REQ = 2009
     private var recResult: MethodChannel.Result? = null
     private var mediaProjection: MediaProjection? = null
@@ -1477,32 +1476,20 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun assistRequest(result: MethodChannel.Result) {
+        // Android tidak mengizinkan app meminta peran asisten via kode
+        // (requestRole hanya untuk sistem) -> buka halaman Default Apps,
+        // user pilih Jarvis sebagai Digital assistant app (1x saja).
         try {
-            if (Build.VERSION.SDK_INT < 29) {
-                val i = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(i)
-                result.success("OK")
-                return
+            val i = if (Build.VERSION.SDK_INT >= 24) {
+                Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+            } else {
+                Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
             }
-            val rm = getSystemService(RoleManager::class.java)
-            if (rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-                result.success("OK")
-                return
-            }
-            roleResult = result
-            rm.requestRole(
-                RoleManager.ROLE_ASSISTANT, mainExecutor,
-                java.util.function.Consumer<Boolean> { granted ->
-                    val r = roleResult
-                    roleResult = null
-                    if (r == null) return@Consumer
-                    if (granted) r.success("OK")
-                    else r.success("Ditolak sistem. Atur manual: Settings > Apps > Default apps > Asisten digital ya Sir.")
-                }
-            )
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            result.success("OK:Pilih Digital assistant app > Jarvis ya Sir.")
         } catch (e: Exception) {
-            result.success("Gagal: ${e.message}")
+            result.success("Gagal buka halaman: ${e.message}")
         }
     }
 
