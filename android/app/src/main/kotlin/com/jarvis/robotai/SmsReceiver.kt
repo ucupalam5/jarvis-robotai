@@ -55,14 +55,17 @@ class SmsReceiver : BroadcastReceiver() {
                 .split(Regex("\\s+")).firstOrNull() ?: ""
             when (cmd) {
                 "RING" -> {
-                    ringLoud(ctx)
+                    SosActions.ringLoud(ctx)
                     replySms(ctx, from, "Jarvis: HP berbunyi sekarang, Sir.")
                 }
                 "LOCK" -> {
-                    lockNow(ctx)
-                    replySms(ctx, from, "Jarvis: HP dikunci.")
+                    if (SosActions.lockNow(ctx)) {
+                        replySms(ctx, from, "Jarvis: HP dikunci.")
+                    } else {
+                        replySms(ctx, from, "Jarvis: gagal kunci (Device Admin belum aktif).")
+                    }
                 }
-                else -> replySms(ctx, from, findText(ctx))
+                else -> replySms(ctx, from, SosActions.locateText(ctx))
             }
         } catch (_: Exception) {}
     }
@@ -84,59 +87,4 @@ class SmsReceiver : BroadcastReceiver() {
         } catch (_: Exception) {}
     }
 
-    private fun ringLoud(ctx: Context) {
-        try {
-            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.ringerMode = AudioManager.RINGER_MODE_NORMAL
-            am.setStreamVolume(
-                AudioManager.STREAM_ALARM,
-                am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0
-            )
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: return
-            val ring = RingtoneManager.getRingtone(ctx, uri) ?: return
-            ring.streamType = AudioManager.STREAM_ALARM
-            ring.play()
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                try {
-                    ring.stop()
-                } catch (_: Exception) {}
-            }, 30000)
-        } catch (_: Exception) {}
-    }
-
-    private fun lockNow(ctx: Context) {
-        try {
-            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE)
-                as DevicePolicyManager
-            val admin = ComponentName(ctx, AdminReceiver::class.java)
-            if (dpm.isAdminActive(admin)) dpm.lockNow()
-        } catch (_: Exception) {}
-    }
-
-    private fun findText(ctx: Context): String {
-        try {
-            val lm = ctx.getSystemService(Context.LOCATION_SERVICE)
-                as LocationManager
-            var best: android.location.Location? = null
-            for (p in listOf(
-                LocationManager.GPS_PROVIDER,
-                LocationManager.NETWORK_PROVIDER
-            )) {
-                try {
-                    val l = lm.getLastKnownLocation(p) ?: continue
-                    if (best == null || (l.time > best.time)) best = l
-                } catch (_: SecurityException) {
-                    return "Jarvis: butuh izin lokasi. Aktifkan: Settings HP > Apps > JARVIS > Permissions > Location."
-                } catch (_: Exception) {}
-            }
-            val b = best ?: return "Jarvis: lokasi belum ada. Nyalakan GPS + buka Maps sekali ya Sir."
-            val ageMin = ((System.currentTimeMillis() - b.time) / 60000).toInt()
-            val age = if (ageMin < 1) "baru saja" else "$ageMin mnt lalu"
-            return "Jarvis di sini Sir: https://maps.google.com/?q=${b.latitude},${b.longitude} (GPS, $age)"
-        } catch (_: Exception) {
-            return "Jarvis: gagal baca lokasi."
-        }
-    }
 }

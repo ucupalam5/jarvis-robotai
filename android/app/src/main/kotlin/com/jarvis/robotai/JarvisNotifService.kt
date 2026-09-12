@@ -18,6 +18,7 @@ import android.app.RemoteInput
  */
 object NotifStore {
     data class Msg(
+        val key: String,
         val pkg: String,
         val sender: String,
         val text: String,
@@ -30,11 +31,36 @@ object NotifStore {
         private set
     private val recent = ArrayDeque<Msg>()
 
+    // Anti-berisik: satu notif yang sama hanya dibacakan 1x per 10 menit.
+    @Volatile private var lastSpokenKey = ""
+    @Volatile private var lastSpokenAt = 0L
+
     @Synchronized
     fun push(m: Msg) {
         latest = m
+        recent.removeAll { it.key == m.key }
         recent.addFirst(m)
         while (recent.size > 10) recent.removeLast()
+    }
+
+    /** Hapus dari ingatan saat notif digeser/hilang (stop baca yang basi). */
+    @Synchronized
+    fun removeByKey(key: String) {
+        recent.removeAll { it.key == key }
+        if (latest?.key == key) latest = recent.firstOrNull()
+    }
+
+    /** true bila boleh dibacakan sekarang (bukan update berulang). */
+    @Synchronized
+    fun shouldSpeak(pkg: String, sender: String, text: String): Boolean {
+        val key = "$pkg|$sender|$text"
+        val now = System.currentTimeMillis()
+        if (key == lastSpokenKey && now - lastSpokenAt < 10 * 60 * 1000) {
+            return false
+        }
+        lastSpokenKey = key
+        lastSpokenAt = now
+        return true
     }
 
     @Synchronized
@@ -107,7 +133,7 @@ class JarvisNotifService : NotificationListenerService() {
             }
             NotifStore.push(
                 NotifStore.Msg(
-                    sbn.packageName, title, text,
+                    sbn.key, sbn.packageName, title, text,
                     System.currentTimeMillis(), replyAction, ri
                 )
             )
@@ -116,11 +142,22 @@ class JarvisNotifService : NotificationListenerService() {
             )
             val auto = sp.getBoolean("notif_read_auto", false) ||
                 sp.getBoolean("flutter.notif_read_auto", false)
-            if (auto) {
+            // Update kecil (progress dsb, ONLY_ALERT_ONCE) tidak dibacakan ulang.
+            val quiet = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
+            if (auto && !quiet &&
+                NotifStore.shouldSpeak(sbn.packageName, title, text)
+            ) {
                 val app = NotifStore.appName(sbn.packageName)
                 val short = if (text.length > 200) text.take(200) + "…" else text
                 speakNotif("Pesan $app dari $title: $short")
             }
+        } catch (_: Exception) {}
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        try {
+            // Notif digeser pengguna = anggap basi, jangan dibaca/dibalas lagi.
+            NotifStore.removeByKey(sbn.key)
         } catch (_: Exception) {}
     }
 

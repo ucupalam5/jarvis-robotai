@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
@@ -55,6 +57,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _appIcon = 'cyan';
   String _loadingBg = '';
   final _sosCtrl = TextEditingController();
+  final _tgTokenCtrl = TextEditingController();
+  final _tgChatCtrl = TextEditingController();
   bool _autoRead = false;
   String _notif = '...';
 
@@ -228,6 +232,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _appIcon = sp.getString('app_icon') ?? 'cyan';
     _loadingBg = sp.getString('loading_bg') ?? '';
     _sosCtrl.text = sp.getString('sos_code') ?? 'JARVIS123';
+    _tgTokenCtrl.text = sp.getString('tg_token') ?? '';
+    _tgChatCtrl.text = sp.getString('tg_chat') ?? '';
     _autoRead = sp.getBool('notif_read_auto') ?? false;
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
@@ -1803,6 +1809,160 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.cyanAccent,
                   side: const BorderSide(color: Colors.cyanAccent)),
+            ),
+            const Divider(color: Colors.white24),
+            const Text('Remote Telegram GRATIS (tanpa pulsa):',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text(
+                'SMS butuh pulsa (aturan operator). Alternatif gratis modal internet:\n1. Chat @BotFather di Telegram > /newbot > copy token.\n2. Chat bot barumu ("halo"), lalu tap Hubungkan.\n3. Dari Telegram mana saja: FIND / RING / LOCK / BATERAI / JAM.\nSyarat: popup Jarvis AKTIF (service-nya yang jaga).',
+                style: TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _tgTokenCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Token bot (123456:ABC...)',
+                labelStyle: TextStyle(color: Colors.white30),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _tgChatCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Chat ID (otomatis via Hubungkan)',
+                labelStyle: TextStyle(color: Colors.white30),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final token = _tgTokenCtrl.text.trim();
+                      if (token.isEmpty || !token.contains(':')) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Isi token bot dulu ya Sir.')));
+                        }
+                        return;
+                      }
+                      try {
+                        final res = await http
+                            .get(Uri.parse(
+                                'https://api.telegram.org/bot$token/getUpdates?timeout=5&limit=20'))
+                            .timeout(const Duration(seconds: 20));
+                        if (res.statusCode == 401) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Token salah, Sir. Cek lagi dari BotFather.')));
+                          }
+                          return;
+                        }
+                        if (res.statusCode != 200) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content: Text(
+                                        'Telegram jawab ${res.statusCode}.')));
+                          }
+                          return;
+                        }
+                        String? chatId;
+                        final data = jsonDecode(res.body);
+                        final arr = (data['result'] ?? []) as List;
+                        for (var i = arr.length - 1; i >= 0; i--) {
+                          final msg = arr[i]['message'];
+                          final id =
+                              msg?['chat']?['id']?.toString();
+                          if (id != null && id.isNotEmpty) {
+                            chatId = id;
+                            break;
+                          }
+                        }
+                        if (chatId == null) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Belum ada chat. Chat bot dulu ("halo"), lalu Hubungkan lagi.')));
+                          }
+                          return;
+                        }
+                        final sp =
+                            await SharedPreferences.getInstance();
+                        await sp.setString('tg_token', token);
+                        await sp.setString('tg_chat', chatId);
+                        _tgChatCtrl.text = chatId;
+                        // Restart popup agar service baca config baru.
+                        await OverlayService.pushConfig();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Terhubung ✓ Sir. Coba kirim FIND dari Telegram.')));
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content:
+                                      Text('Gagal hubungkan: $e')));
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.link, size: 16),
+                    label: const Text('Hubungkan',
+                        style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.cyanAccent,
+                        side: const BorderSide(
+                            color: Colors.cyanAccent)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final sp =
+                          await SharedPreferences.getInstance();
+                      await sp.remove('tg_token');
+                      await sp.remove('tg_chat');
+                      _tgTokenCtrl.clear();
+                      _tgChatCtrl.clear();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'Remote Telegram dimatikan.')));
+                      }
+                    },
+                    icon: const Icon(Icons.link_off, size: 16),
+                    label: const Text('Putuskan',
+                        style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orangeAccent,
+                        side: const BorderSide(
+                            color: Colors.orangeAccent)),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             const Text('Ikon galeri di layar utama:',
