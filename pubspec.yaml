@@ -1,7 +1,7 @@
 name: jarvis_robotai
 description: Asisten RobotAI pribadi ala Jarvis - voice control Android + Groq AI.
 publish_to: 'none'
-version: 1.7.0+7
+version: 1.8.0+8
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
