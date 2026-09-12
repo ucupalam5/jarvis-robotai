@@ -65,7 +65,6 @@ class MainActivity : FlutterActivity() {
     private val BT_REQ = 2008
     private var btResult: MethodChannel.Result? = null
     private var roleResult: MethodChannel.Result? = null
-    private var roleResult: MethodChannel.Result? = null
     private val REC_REQ = 2009
     private var recResult: MethodChannel.Result? = null
     private var mediaProjection: MediaProjection? = null
