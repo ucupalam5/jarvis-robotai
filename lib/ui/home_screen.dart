@@ -2098,23 +2098,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 4),
-            // Status polling service: kapan terakhir cek Telegram.
-            FutureBuilder<int>(
-              future: SharedPreferences.getInstance()
-                  .then((sp) => sp.getInt('tg_last_ok') ?? 0),
+            // Status polling service: kapan terakhir cek Telegram + error.
+            FutureBuilder<List<Object?>>(
+              future: SharedPreferences.getInstance().then((sp) => [
+                    sp.getInt('tg_last_ok') ?? 0,
+                    sp.getString('tg_last_err') ?? '',
+                  ]),
               builder: (c, snap) {
-                final last = snap.data ?? 0;
+                final last = (snap.data?[0] ?? 0) as int;
+                final err = (snap.data?[1] ?? '') as String;
                 String txt;
-                if (last == 0) {
+                if (last == 0 && err.isEmpty) {
                   txt =
                       'Status remote: belum pernah polling (service mati?).';
+                } else if (last == 0) {
+                  txt = 'Status remote: gagal ($err). Cek token + internet.';
                 } else {
                   final t =
                       DateTime.fromMillisecondsSinceEpoch(last);
                   String two(int v) =>
                       v.toString().padLeft(2, '0');
                   txt =
-                      'Status remote: polling jalan, cek terakhir ${two(t.hour)}:${two(t.minute)}:${two(t.second)}.';
+                      'Status remote: polling jalan, cek terakhir ${two(t.hour)}:${two(t.minute)}:${two(t.second)}.'
+                      '${err.isEmpty ? '' : ' Terakhir error: $err'}';
                 }
                 return Text(txt,
                     style: const TextStyle(

@@ -71,7 +71,14 @@ class TgPollService : Service() {
     private fun markOk() {
         try {
             prefs().edit()
-                .putLong("tg_last_ok", System.currentTimeMillis()).apply()
+                .putLong("tg_last_ok", System.currentTimeMillis())
+                .remove("tg_last_err").apply()
+        } catch (_: Exception) {}
+    }
+
+    private fun markErr(e: String) {
+        try {
+            prefs().edit().putString("tg_last_err", e.take(90)).apply()
         } catch (_: Exception) {}
     }
 
@@ -126,7 +133,8 @@ class TgPollService : Service() {
                             tgHandle(token, chat, text.trim())
                         }
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    markErr(e.message ?: "jaringan?")
                     try {
                         Thread.sleep(15000)
                     } catch (_: Exception) {}
