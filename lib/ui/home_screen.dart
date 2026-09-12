@@ -53,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double _level = 0;
   bool _handsfree = false;
   bool _silent = false;
+  bool _reelsMode = false;
   String _keyCheck = ''; // '' | 'ok' | 'bad:pesan'
   String _loadingTheme = 'cyan';
   String _appIcon = 'cyan';
@@ -439,6 +440,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) setState(() => _silent = on);
       return msg;
     }
+    if (res == 'REELS:1') {
+      if (mounted) setState(() => _reelsMode = true);
+      return 'Mode reels ON, Sir. Bilang lanjut, geser, skip, atau ganti. Suara saya matikan biar video lancar. "Mode reels mati" untuk keluar.';
+    }
+    if (res == 'REELS:0') {
+      if (mounted) setState(() => _reelsMode = false);
+      return 'Mode reels mati, Sir.';
+    }
     if (res.startsWith('BATERAI_REPLY:')) {
       return res.substring('BATERAI_REPLY:'.length);
     }
@@ -541,6 +550,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _handleText(String text) async {
     if (text.trim().isEmpty || _busy) return;
     final tl = text.toLowerCase().trim();
+    // MODE REELS: geser video pendek tanpa sentuh. Keluar: "mode reels mati".
+    if (_reelsMode) {
+      if (tl.contains('mode reels mati') ||
+          tl.contains('reels mati') ||
+          tl == 'berhenti' ||
+          tl == 'cukup' ||
+          tl == 'stop') {
+        if (mounted) setState(() => _reelsMode = false);
+        if (mounted) {
+          setState(() {
+            _chat.add(ChatMsg('user', text));
+            _chat.add(ChatMsg('jarvis', 'Mode reels mati, Sir.'));
+          });
+        }
+        _scrollDown();
+        return;
+      }
+      const nextWord = [
+        'lanjut', 'lanjutin', 'geser', 'geserin', 'skip',
+        'ganti', 'lewat', 'lewatin', 'next', 'bawah'
+      ];
+      const prevWord = ['kembali', 'atas', 'balik', 'previous'];
+      final isNext = nextWord.any((w) => tl.contains(w));
+      final isPrev = !isNext && prevWord.any((w) => tl.contains(w));
+      if (isNext || isPrev) {
+        if (mounted) {
+          setState(() {
+            _busy = true;
+            _chat.add(ChatMsg('user', text));
+          });
+        }
+        final r = isNext
+            ? await AppController.accSwipeUp()
+            : await AppController.accSwipeDown();
+        if (mounted) {
+          setState(() {
+            _chat.add(ChatMsg(
+                'jarvis', r == 'OK' ? '⏭' : 'Aktifkan Aksesibilitas dulu ya Sir.'));
+            _busy = false;
+          });
+        }
+        _scrollDown();
+        return; // tanpa suara agar video tidak keganggu.
+      }
+    }
     // Mode senyap: Jarvis hanya teks, tanpa suara.
     if (tl == 'mode senyap' ||
         tl == 'senyap' ||
@@ -1070,6 +1124,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _quick('Baterai', () => _handleText('baterai berapa')),
                 _quick(_handsfree ? 'Handsfree ON' : 'Handsfree',
                     () => _setHandsfree(!_handsfree)),
+                _quick(_reelsMode ? 'Reels ON' : 'Reels',
+                    () => _handleText(
+                        _reelsMode ? 'mode reels mati' : 'mode reels')),
                 _quick(_silent ? 'Senyap ON' : 'Senyap', () {
                   if (_silent) {
                     _handleText('mode suara');

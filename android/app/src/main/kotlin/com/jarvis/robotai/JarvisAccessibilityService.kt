@@ -55,7 +55,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             }
         }
 
-        /** Swipe atas (buka kunci geser / scroll). */
+        /** Swipe atas (reels berikutnya / buka kunci geser / scroll). */
         fun swipeUp(): String {
             val s = instance
                 ?: return "Aksesibilitas belum aktif. Aktifkan: Settings HP > Accessibility > Jarvis > ON."
@@ -64,6 +64,26 @@ class JarvisAccessibilityService : AccessibilityService() {
                 val path = Path().apply {
                     moveTo(dm.widthPixels / 2f, dm.heightPixels * 0.8f)
                     lineTo(dm.widthPixels / 2f, dm.heightPixels * 0.3f)
+                }
+                val g = GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
+                    .build()
+                if (s.dispatchGesture(g, null, null)) "OK"
+                else "Gesture ditolak sistem."
+            } catch (e: Exception) {
+                "Gagal swipe: ${e.message}"
+            }
+        }
+
+        /** Swipe bawah (reels sebelumnya / scroll atas). */
+        fun swipeDown(): String {
+            val s = instance
+                ?: return "Aksesibilitas belum aktif. Aktifkan: Settings HP > Accessibility > Jarvis > ON."
+            return try {
+                val dm = s.resources.displayMetrics
+                val path = Path().apply {
+                    moveTo(dm.widthPixels / 2f, dm.heightPixels * 0.3f)
+                    lineTo(dm.widthPixels / 2f, dm.heightPixels * 0.8f)
                 }
                 val g = GestureDescription.Builder()
                     .addStroke(GestureDescription.StrokeDescription(path, 0, 300))

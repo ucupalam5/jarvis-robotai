@@ -64,6 +64,8 @@ class MainActivity : FlutterActivity() {
     private var locResult: MethodChannel.Result? = null
     private val BT_REQ = 2008
     private var btResult: MethodChannel.Result? = null
+    private val AUDIO_REQ = 2012
+    private var audioResult: MethodChannel.Result? = null
     private val REC_REQ = 2009
     private var recResult: MethodChannel.Result? = null
     private var mediaProjection: MediaProjection? = null
@@ -403,6 +405,28 @@ class MainActivity : FlutterActivity() {
                         result.success(JarvisAccessibilityService.tapAt(x, y))
                     }
                     "accSwipeUp" -> result.success(JarvisAccessibilityService.swipeUp())
+                    "accSwipeDown" -> result.success(JarvisAccessibilityService.swipeDown())
+                    "requestAudio" -> requestAudio(result)
+                    "openUrl" -> {
+                        val u = call.argument<String>("url") ?: ""
+                        result.success(openUrl(u))
+                    }
+                    "playMusic" -> {
+                        val title = call.argument<String>("title") ?: ""
+                        Thread {
+                            val r = MusicPlayer.play(this@MainActivity, title)
+                            val out = if (r.startsWith("OK:")) {
+                                "SAY:Memutar ${r.removePrefix("OK:")}, Sir."
+                            } else {
+                                "SAY:$r"
+                            }
+                            runOnUiThread { result.success(out) }
+                        }.start()
+                    }
+                    "stopMusic" -> {
+                        MusicPlayer.stop()
+                        result.success("OK")
+                    }
                     "accType" -> {
                         val text = call.argument<String>("text") ?: ""
                         result.success(JarvisAccessibilityService.typeText(text))
@@ -818,7 +842,60 @@ class MainActivity : FlutterActivity() {
             } else {
                 r.success("DENIED:Butuh izin Bluetooth. Buka Settings HP > Apps > JARVIS > Permissions > Nearby devices > Allow ya Sir.")
             }
+        } else if (requestCode == AUDIO_REQ) {
+            val r = audioResult
+            audioResult = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                r.success("OK")
+            } else {
+                r.success("DENIED:Butuh izin file audio untuk putar lagu lokal. Buka Settings HP > Apps > JARVIS > Permissions > Files/Music > Allow ya Sir.")
+            }
         }
+    }
+
+    /** Buka URL / deep link apapun (youtube, navigasi, dsb). */
+    private fun openUrl(url: String): String {
+        if (url.isBlank()) return "URL kosong."
+        return try {
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal buka link: ${e.message}"
+        }
+    }
+
+    /** Izin file audio (untuk putar MP3 lokal). */
+    private fun requestAudio(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.READ_MEDIA_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                result.success("OK")
+                return
+            }
+            audioResult = result
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.READ_MEDIA_AUDIO), AUDIO_REQ
+            )
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success("OK")
+            return
+        }
+        audioResult = result
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), AUDIO_REQ
+        )
     }
 
     /** Izin Bluetooth Android 12+ (untuk nyala/mati bluetooth). */

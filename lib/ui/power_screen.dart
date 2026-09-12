@@ -25,13 +25,15 @@ class PowerScreen extends StatefulWidget {
   State<PowerScreen> createState() => _PowerScreenState();
 }
 
-class _PowerScreenState extends State<PowerScreen> {
+class _PowerScreenState extends State<PowerScreen>
+    with WidgetsBindingObserver {
   late final List<PowerItem> _items;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _items = [
       PowerItem(
           title: 'Microphone',
@@ -118,6 +120,18 @@ class _PowerScreenState extends State<PowerScreen> {
           request: () => AppController.assistRequest()),
     ];
     _refreshAll();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Balik dari halaman izin sistem -> cek ulang otomatis (biar status jujur).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshAll();
   }
 
   Future<void> _refreshAll() async {

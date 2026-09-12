@@ -134,6 +134,13 @@ class AppController {
   static Future<String> setBluetooth(bool on) =>
       _invoke('setBluetooth', {'on': on});
   static Future<String> requestBt() => _invoke('requestBt');
+  static Future<String> requestAudio() => _invoke('requestAudio');
+  static Future<String> openUrl(String url) =>
+      _invoke('openUrl', {'url': url});
+  static Future<String> playMusic(String title) =>
+      _invoke('playMusic', {'title': title});
+  static Future<String> stopMusic() => _invoke('stopMusic');
+  static Future<String> accSwipeDown() => _invoke('accSwipeDown');
   static Future<String> takePhoto(bool front) =>
       _invoke('takePhoto', {'front': front});
 

@@ -1013,6 +1013,90 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
+  // --- MUSIK LOKAL HP: "putar lagu X" (MP3 offline, auto-play beneran) ---
+  if (has(['putar lagu', 'mainkan lagu', 'nyalakan lagu', 'setel lagu',
+      'putarkan lagu'])) {
+    var title = s
+        .replaceAll(
+            RegExp(r'(tolong|dong|coba|putar|putarkan|mainkan|nyalakan|setel|lagu)'),
+            ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (title.length < 2) {
+      return ParsedCommand(
+          handledLocally: true,
+          reply: 'Lagu apa Sir? Contoh: putar vierra.');
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencari $title, Sir.',
+      action: () async {
+        final p = await AppController.requestAudio();
+        if (p != 'OK') return 'SAY:$p';
+        return AppController.playMusic(title);
+      },
+    );
+  }
+  if (has(['musik stop', 'berhenti musik', 'stop musik', 'matikan musik'])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Musik berhenti, Sir.',
+      action: () => AppController.stopMusic(),
+    );
+  }
+
+  // --- YOUTUBE SEARCH: "youtube denny caknan" (hasil langsung kebuka) ---
+  if (has(['youtube']) &&
+      (has(['cari', 'carikan', 'putar', 'mainkan', 'lagu', 'video']) ||
+          s.startsWith('yt '))) {
+    var q = s
+        .replaceAll(
+            RegExp(r'(tolong|dong|coba|buka|youtube|yt|cari|carikan|putar|mainkan|lagu|video|di)'),
+            ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (q.isEmpty) q = 'musik indonesia';
+    final url =
+        'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}';
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencari $q di YouTube, Sir. Tap sekali untuk play.',
+      action: () => AppController.openUrl(url),
+    );
+  }
+
+  // --- NAVIGASI: "antar ke Monas" (langsung mode jalan) ---
+  if (s.startsWith('antar ke') ||
+      s.startsWith('navigasi ke') ||
+      s.startsWith('arah ke') ||
+      s.contains('rute ke')) {
+    var dest = s
+        .replaceFirst(
+            RegExp(r'^(antar ke|navigasi ke|arah ke|.*rute ke)\s+'), '')
+        .trim();
+    if (dest.isEmpty) {
+      return ParsedCommand(
+          handledLocally: true, reply: 'Mau diantar ke mana, Sir?');
+    }
+    final url =
+        'google.navigation:q=${Uri.encodeComponent(dest)}';
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Navigasi ke $dest, Sir.',
+      action: () => AppController.openUrl(url),
+    );
+  }
+
+  // --- MODE REELS: scroll TikTok/Reels/Shorts via suara ---
+  if (has(['mode reels'])) {
+    final on = !(has(['mati', 'matikan', 'matiin', 'off', 'berhenti']));
+    return ParsedCommand(
+      handledLocally: true,
+      reply: on ? 'Mode reels, Sir.' : 'Mode reels mati, Sir.',
+      action: () async => on ? 'REELS:1' : 'REELS:0',
+    );
+  }
+
   // --- Bukan perintah lokal -> lempar ke Groq AI (butuh internet) ---
   return ParsedCommand(handledLocally: false, reply: '');
 }

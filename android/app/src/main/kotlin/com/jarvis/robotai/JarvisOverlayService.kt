@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -18,6 +19,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.bluetooth.BluetoothAdapter
 import android.content.ContentValues
 import android.net.Uri
@@ -101,6 +103,7 @@ class JarvisOverlayService : Service() {
     override fun onDestroy() {
         running = false
         stopAutoListen()
+        MusicPlayer.stop()
         try {
             tts?.stop()
             tts?.shutdown()
@@ -794,6 +797,77 @@ class JarvisOverlayService : Service() {
                 speak(jokes[(System.currentTimeMillis() % jokes.size).toInt()])
                 return
             }
+            // MUSIK LOKAL: "putar lagu X" (file MP3 di HP, tanpa internet).
+            if (s.contains("putar lagu") || s.contains("mainkan lagu") ||
+                s.contains("nyalakan lagu") || s.contains("setel lagu")
+            ) {
+                var title = s.replace(
+                    Regex("(tolong|dong|coba|putar|mainkan|nyalakan|setel|lagu)"),
+                    " "
+                ).replace(Regex("\\s+"), " ").trim()
+                if (title.length < 2) {
+                    speak("Lagu apa Sir? Contoh: putar vierra.")
+                    return
+                }
+                speak(playLocalMusic(title))
+                return
+            }
+            if (s.contains("musik stop") || s.contains("berhenti musik") ||
+                s.contains("stop musik")
+            ) {
+                stopLocalMusic()
+                speak("Musik berhenti, Sir.")
+                return
+            }
+            // YOUTUBE: buka hasil pencarian (tap sekali untuk play).
+            if ((s.contains("youtube") || s.startsWith("yt ")) &&
+                (s.contains("cari") || s.contains("putar") || s.contains("mainkan"))
+            ) {
+                var q = s.replace(
+                    Regex("(tolong|dong|coba|buka|youtube|yt|cari|carikan|putar|mainkan|lagu|video|di)"),
+                    " "
+                ).replace(Regex("\\s+"), " ").trim()
+                if (q.isEmpty()) q = "musik indonesia"
+                try {
+                    val i = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(
+                            "https://www.youtube.com/results?search_query=" +
+                                Uri.encode(q)
+                        )
+                    )
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    speak("Mencari $q di YouTube, Sir. Tap sekali untuk play.")
+                } catch (_: Exception) {
+                    speak("YouTube gagal dibuka.")
+                }
+                return
+            }
+            // NAVIGASI: "antar ke Monas" (langsung mode jalan).
+            if (s.startsWith("antar ke") || s.startsWith("navigasi ke") ||
+                s.startsWith("arah ke") || s.contains("rute ke")
+            ) {
+                var dest = s.replaceFirst(
+                    Regex("^(antar ke|navigasi ke|arah ke|.*rute ke)\\s+"), ""
+                ).trim()
+                if (dest.isEmpty()) {
+                    speak("Mau diantar ke mana, Sir?")
+                    return
+                }
+                try {
+                    val i = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("google.navigation:q=" + Uri.encode(dest))
+                    )
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    speak("Navigasi ke $dest, Sir.")
+                } catch (_: Exception) {
+                    speak("Maps gagal dibuka.")
+                }
+                return
+            }
             // NOTIFIKASI: baca pesan terakhir + balas via suara.
             if (s.startsWith("ada pesan") || s.startsWith("baca notif") ||
                 s.startsWith("notif terakhir") || s.startsWith("pesan masuk") ||
@@ -990,6 +1064,17 @@ class JarvisOverlayService : Service() {
                 }
             }
         }
+    }
+
+    /** Putar MP3 lokal (implementasi di MusicPlayer, dipakai app juga). */
+    private fun playLocalMusic(title: String): String {
+        val r = MusicPlayer.play(this, title)
+        if (r.startsWith("OK:")) return "Memutar ${r.removePrefix("OK:")}, Sir."
+        return r
+    }
+
+    private fun stopLocalMusic() {
+        MusicPlayer.stop()
     }
 
     private fun camIdList(): Array<String> {
