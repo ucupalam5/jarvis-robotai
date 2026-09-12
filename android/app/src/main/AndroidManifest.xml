@@ -159,6 +159,11 @@
             </intent-filter>
         </service>
 
+        <!-- Remote Telegram (service mandiri, tetap jalan tanpa popup) -->
+        <service
+            android:name=".TgPollService"
+            android:exported="false" />
+
         <!-- Popup robot Jarvis (foreground service + overlay window).
              specialUse dipakai khusus Android 14+ via kode (runtime),
              jadi tanpa foregroundServiceType di manifest agar lolos install

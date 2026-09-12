@@ -290,6 +290,8 @@ class MainActivity : FlutterActivity() {
                     // --- Asisten default (tombol power panggil Jarvis) ---
                     "assistCheck" -> result.success(assistStatus())
                     "assistRequest" -> assistRequest(result)
+                    // --- Remote Telegram: nyalakan/matikan service polling ---
+                    "tgRestart" -> result.success(tgRestart())
                     // --- Kontak: izin + cari nomor dari nama ---
                     "requestContacts" -> requestContacts(result)
                     "resolveContact" -> {
@@ -1039,6 +1041,28 @@ class MainActivity : FlutterActivity() {
             ),
             LOC_REQ
         )
+    }
+
+    /** Nyalakan service Telegram bila token+chat ada, else matikan. */
+    private fun tgRestart(): String {
+        return try {
+            val sp = getSharedPreferences(
+                "FlutterSharedPreferences", Context.MODE_PRIVATE
+            )
+            val token = sp.getString("tg_token", "")
+                ?: sp.getString("flutter.tg_token", "") ?: ""
+            val chat = sp.getString("tg_chat", "")
+                ?: sp.getString("flutter.tg_chat", "") ?: ""
+            val i = Intent(this, TgPollService::class.java)
+            try {
+                stopService(i)
+            } catch (_: Exception) {}
+            if (token.isBlank() || chat.isBlank()) return "OK:remote mati"
+            ContextCompat.startForegroundService(this, i)
+            "OK"
+        } catch (e: Exception) {
+            "Gagal remote: ${e.message}"
+        }
     }
 
     /**

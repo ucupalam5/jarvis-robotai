@@ -246,6 +246,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _refreshAcc(silent: true);
     _refreshAdmin(silent: true);
     _refreshNotif(silent: true);
+    // Nyalakan remote Telegram bila sudah dikonfigurasi (mandiri dari popup).
+    try {
+      final sp2 = await SharedPreferences.getInstance();
+      if ((sp2.getString('tg_token') ?? '').isNotEmpty &&
+          (sp2.getString('tg_chat') ?? '').isNotEmpty) {
+        AppController.tgRestart();
+      }
+    } catch (_) {}
     _checkKey(silent: true);
     _requestStartupPermissions();
     _cacheApps();
@@ -1921,8 +1929,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         await sp.setString('tg_token', token);
                         await sp.setString('tg_chat', chatId);
                         _tgChatCtrl.text = chatId;
-                        // Restart popup agar service baca config baru.
-                        await OverlayService.pushConfig();
+                        // Nyalakan service remote mandiri (tanpa perlu popup).
+                        await AppController.tgRestart();
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -1957,6 +1965,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       await sp.remove('tg_chat');
                       _tgTokenCtrl.clear();
                       _tgChatCtrl.clear();
+                      await AppController.tgRestart();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -1974,6 +1983,86 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final token = _tgTokenCtrl.text.trim();
+                  final chat = _tgChatCtrl.text.trim();
+                  if (token.isEmpty ||
+                      !token.contains(':') ||
+                      chat.isEmpty) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'Isi token + Hubungkan dulu ya Sir.')));
+                    }
+                    return;
+                  }
+                  // TES LANGSUNG: kirim pesan via API (tanpa service).
+                  // Masuk = token+chat BENAR. Tak masuk = config salah.
+                  try {
+                    final res = await http
+                        .post(
+                          Uri.parse(
+                              'https://api.telegram.org/bot$token/sendMessage'),
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'chat_id': chat,
+                            'text':
+                                'Tes Jarvis ✓ Sir. Remote tersambung. Coba kirim FIND.',
+                          }),
+                        )
+                        .timeout(const Duration(seconds: 20));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(res.statusCode == 200
+                                  ? 'Pesan tes terkirim ✓ Cek Telegram, Sir.'
+                                  : 'Tes gagal (${res.statusCode}). Token/chat salah.')));
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Tes gagal: $e')));
+                    }
+                  }
+                },
+                icon: const Icon(Icons.send, size: 16),
+                label: const Text('Tes kirim pesan',
+                    style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.greenAccent,
+                    side:
+                        const BorderSide(color: Colors.greenAccent)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Status polling service: kapan terakhir cek Telegram.
+            FutureBuilder<int>(
+              future: SharedPreferences.getInstance()
+                  .then((sp) => sp.getInt('tg_last_ok') ?? 0),
+              builder: (c, snap) {
+                final last = snap.data ?? 0;
+                String txt;
+                if (last == 0) {
+                  txt =
+                      'Status remote: belum pernah polling (service mati?).';
+                } else {
+                  final t =
+                      DateTime.fromMillisecondsSinceEpoch(last);
+                  String two(int v) =>
+                      v.toString().padLeft(2, '0');
+                  txt =
+                      'Status remote: polling jalan, cek terakhir ${two(t.hour)}:${two(t.minute)}:${two(t.second)}.';
+                }
+                return Text(txt,
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 11));
+              },
             ),
             const SizedBox(height: 8),
             const Text('Ikon galeri di layar utama:',

@@ -99,6 +99,9 @@ class AppController {
   static Future<String> assistCheck() => _invoke('assistCheck');
   static Future<String> assistRequest() => _invoke('assistRequest');
 
+  // --- Remote Telegram (service mandiri) ---
+  static Future<String> tgRestart() => _invoke('tgRestart');
+
   // --- Kontak: izin + cari nomor dari nama + chat WA langsung ---
   static Future<String> requestContacts() => _invoke('requestContacts');
   static Future<String> resolveContact(String name) =>
