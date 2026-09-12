@@ -221,6 +221,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Nyalakan remote Telegram lagi sehabis reboot -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Widget home screen: tap = buka + langsung dengar -->
         <receiver
             android:name=".JarvisWidgetProvider"
