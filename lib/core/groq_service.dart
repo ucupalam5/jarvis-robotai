@@ -103,6 +103,115 @@ Jawaban maksimal 3 kalimat kecuali diminta menjelaskan panjang.
     return 'Sir, semua model Groq gagal ($lastErr). Cek internet / key / kuota ya Sir.';
   }
 
+  /// Chat dengan FUNCTION CALLING (format OpenAI-compatible, didukung Groq).
+  ///
+  /// [tools]: daftar definisi tool JSON Schema, mis:
+  ///   {'type':'function','function':{'name':'set_reminder',
+  ///    'description':'...','parameters':{'type':'object','properties':{...}}}}
+  /// [onTool]: eksekutor (namaTool, argumen) -> hasil string untuk AI.
+  /// AI boleh memanggil tool beberapa kali; dibatasi [maxRounds} putaran
+  /// agar tidak loop selamanya. Return jawaban akhir AI sebagai teks.
+  Future<String> chatWithTools(
+    String userText,
+    List<Map<String, String>> history,
+    List<Map<String, dynamic>> tools,
+    Future<String> Function(String name, Map<String, dynamic> args) onTool, {
+    String memory = '',
+    int maxRounds = 3,
+  }) async {
+    if (apiKey.isEmpty) {
+      return 'Sir, Groq API key belum dipasang. Masukkan di Settings ya Sir.';
+    }
+    final sys = memory.isEmpty
+        ? systemPrompt
+        : '$systemPrompt\nFakta tentang user (pakai bila relevan):\n$memory';
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': sys},
+      ...history.takeLast(10),
+      {'role': 'user', 'content': userText},
+    ];
+    String lastErr = '';
+    for (final m in models) {
+      try {
+        var rounds = 0;
+        while (rounds < maxRounds) {
+          rounds++;
+          final res = await http
+              .post(
+                Uri.parse(_url),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $apiKey',
+                },
+                body: jsonEncode({
+                  'model': m,
+                  'messages': messages,
+                  'temperature': 0.7,
+                  'max_tokens': 400,
+                  if (tools.isNotEmpty) 'tools': tools,
+                  if (tools.isNotEmpty) 'tool_choice': 'auto',
+                }),
+              )
+              .timeout(const Duration(seconds: 20));
+          if (res.statusCode == 401) {
+            return 'Sir, API key salah/expired (401). Buat baru di console.groq.com ya Sir.';
+          }
+          if (res.statusCode != 200) {
+            lastErr = '${res.statusCode}';
+            break; // coba model cadangan
+          }
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final msg =
+              (data['choices'][0]['message'] ?? {}) as Map<String, dynamic>;
+          final toolCalls = (msg['tool_calls'] as List?) ?? [];
+          if (toolCalls.isEmpty) {
+            return ((msg['content'] ?? '') as String).trim();
+          }
+          // Ada tool call -> eksekusi satu per satu, hasilnya kembali ke AI.
+          messages.add({
+            'role': 'assistant',
+            'content': msg['content'],
+            'tool_calls': toolCalls,
+          });
+          for (final tc in toolCalls) {
+            final fn = (tc['function'] ?? {}) as Map<String, dynamic>;
+            final name = (fn['name'] ?? '').toString();
+            Map<String, dynamic> args;
+            try {
+              args = jsonDecode((fn['arguments'] ?? '{}').toString())
+                  as Map<String, dynamic>;
+            } catch (_) {
+              args = {};
+            }
+            String out;
+            try {
+              out = await onTool(name, args).timeout(
+                const Duration(seconds: 25),
+                onTimeout: () => 'Tool $name timeout.',
+              );
+            } catch (e) {
+              out = 'Tool $name gagal: $e';
+            }
+            messages.add({
+              'role': 'tool',
+              'tool_call_id': (tc['id'] ?? '').toString(),
+              'content': out,
+            });
+          }
+          // lanjut putaran: AI merangkum hasil tool menjadi jawaban.
+        }
+        // maxRounds tercapai tanpa jawaban akhir -> minta rangkuman paksa.
+        lastErr = 'tool-loop';
+      } catch (e) {
+        lastErr = '$e';
+      }
+    }
+    if (lastErr.contains('429')) {
+      return 'Sir, kuota gratis Groq habis (429). Tunggu ~1 menit lalu coba lagi ya Sir.';
+    }
+    return 'Sir, semua model Groq gagal ($lastErr). Cek internet / key / kuota ya Sir.';
+  }
+
   /// Tanya AI dengan gambar (screenshot layar). Model vision + fallback.
   Future<String> askVision(String imagePath, String question) async {
     if (apiKey.isEmpty) {
