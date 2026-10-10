@@ -1,4 +1,12 @@
 {
-  "questions": [],
+  "questions": [
+    {
+      "id": "qtest",
+      "at": 1791644205,
+      "from": "jarvis-app",
+      "text": "Tes koneksi: apakah FarestAI bisa mendengar saya?",
+      "status": "open"
+    }
+  ],
   "facts": []
 }
