@@ -2,15 +2,9 @@
   "items": [
     {
       "id": "init-2026-10-10",
-      "at": 1760095200,
+      "at": 1791600000,
       "title": "Papan pengumuman aktif",
-      "text": "JARVIS sekarang terhubung ke cron. Tugas yang selesai akan diumumkan di sini."
-    },
-    {
-      "id": "a1791644290",
-      "at": 1791644290,
-      "title": "FarestAI menjawab",
-      "text": "Iya bro, gue dengar kamu dengan jelas. Koneksi FarestAI Link jalan normal, tes round-trip berhasil."
+      "text": "JARVIS sekarang terhubung ke cron dan FarestAI. Tugas yang selesai akan diumumkan di sini."
     }
   ]
 }
