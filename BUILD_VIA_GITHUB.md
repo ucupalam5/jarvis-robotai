@@ -21,13 +21,16 @@ Jawaban singkat: **YA, BISA.** GitHub kasih mesin Ubuntu gratis untuk build Flut
 - Actions -> klik run terbaru yang hijau -> scroll **Artifacts** -> download `jarvis-app-release` (zip berisi `app-release.apk`).
 - Pindah ke HP -> install -> izinkan Unknown apps.
 
-### 4. Setelah install
-1. Install app **Shizuku** dari Play Store.
-2. Shizuku > Pairing > aktifkan Opsi Pengembang > Wireless Debugging > Pair dengan kode (TANPA PC, pairing lokal di HP yang sama, Android 11+).
-3. Shizuku > Start -> Authorized apps -> izinkan `com.jarvis.robotai`.
-4. Buka Jarvis -> chip Shizuku harus hijau `OK`. Bila `BELUM_IZIN`, tap `Izin Shizuku`.
-5. Settings Jarvis: isi Groq key + PIN (opsional).
-6. Coba: "nyalakan layar", "buka youtube", "ketik halo", "tap kirim".
+### 4. Setelah install (aktifkan izin satu per satu)
+
+Buka Jarvis -> ikon perisai **Pusat Kekuasaan** di AppBar — semua 16 izin dicek otomatis di satu layar:
+
+1. **AccessibilityService** (wajib untuk "tutup aplikasi" & otomatisasi tap/ketik): Settings HP > Accessibility > Jarvis > ON.
+2. **Device Admin** (untuk "kunci layar"): aktifkan saat diminta app.
+3. **Display over other apps** (untuk popup robot melayang): izinkan saat tap tombol overlay.
+4. **Microphone** (untuk perintah suara): izinkan saat tap orb pertama kali.
+5. Settings Jarvis: isi **Groq API key** (gratis di console.groq.com) + **kode SMS SOS** + nomor tepercaya (opsional).
+6. Coba: "buka youtube", "kunci layar", "nyalakan senter", "ingatkan minum obat jam 7 pagi", "briefing pagi".
 
 ## Troubleshooting GitHub Actions
 - `flutter.sdk not set` / Gradle error: pastikan push **isi folder**, bukan folder zip. Struktur repo harus langsung ada `pubspec.yaml` di root.
@@ -35,6 +38,8 @@ Jawaban singkat: **YA, BISA.** GitHub kasih mesin Ubuntu gratis untuk build Flut
 - Artifact kosong: pastikan build sukses (centang hijau). APK ada di `build/app/outputs/flutter-apk/app-release.apk`.
 - Update app: edit file -> push lagi -> APK baru otomatis jadi.
 
-## Batas jujur Shizuku
-- Shizuku = izin ADB, BUKAN root. Bisa `input tap/text/keyevent`, `am start`, `cmd`. **Tidak bisa**: nyalakan HP mati total, bobol PIN di Samsung/Xiaomi baru (tetap diblokir sistem), kirim WA 100% background (WA tidak ada API).
-- Alur WA otomatis maksimal: `kirim wa ke 0812 halo` -> buka chat -> `ketik ...` -> `tap kirim`. Kadang koordinat tombol kirim beda per HP — sesuaikan x y di `ShizukuHelper.tap()` / perintah `shizuku input tap x y`.
+## Batas jujur otomatisasi
+
+- Otomatisasi tap/ketik memakai **AccessibilityService** (bukan Shizuku — tidak ada kode Shizuku di repo ini, jadi tidak perlu install Shizuku).
+- Alur WA otomatis maksimal: `kirim wa ke 0812 halo` -> buka chat -> `ketik ...` -> `tap kirim`. Kadang koordinat tombol kirim beda per HP — sesuaikan di kode perintah terkait.
+- **Tidak bisa**: nyalakan HP mati total (butuh tombol power hardware), bobol PIN di Samsung/Xiaomi baru (tetap diblokir sistem), kirim WA 100% background (WA tidak ada API).

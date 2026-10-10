@@ -19,6 +19,8 @@ import android.telephony.SmsMessage
  *   <KODE> LOCK  -> kunci HP (butuh Device Admin)
  *   <KODE>       -> balas SMS berisi link lokasi GPS
  * Kode diatur di Settings Jarvis (default JARVIS123). JAGA RAHASIA.
+ * Opsional: batasi pengirim lewat allowlist "Nomor tepercaya SOS" di
+ * Settings (dipisah koma). Kalau diisi, SMS dari nomor lain diabaikan.
  * Butuh izin: RECEIVE_SMS + SEND_SMS (+ LOCATION untuk FIND).
  */
 class SmsReceiver : BroadcastReceiver() {
@@ -51,6 +53,16 @@ class SmsReceiver : BroadcastReceiver() {
             if (from.isEmpty()) return
             val text = body.toString().trim()
             if (!text.uppercase().startsWith(code)) return
+            // Allowlist nomor tepercaya (diset di Settings Jarvis, dipisah koma).
+            // Kalau diisi, SMS dari nomor di luar daftar DIABAIKAN walau
+            // kodenya benar. Kalau kosong, perilaku lama (siapa pun berkode).
+            val trustedRaw = (sp.getString("sos_trusted", "")
+                ?: sp.getString("flutter.sos_trusted", "") ?: "")
+            val trusted = trustedRaw.split(",")
+                .map { normPhone(it) }
+                .filter { it.length >= 9 }
+                .toSet()
+            if (trusted.isNotEmpty() && normPhone(from) !in trusted) return
             val cmd = text.substring(code.length).trim().uppercase()
                 .split(Regex("\\s+")).firstOrNull() ?: ""
             when (cmd) {
@@ -70,8 +82,17 @@ class SmsReceiver : BroadcastReceiver() {
         } catch (_: Exception) {}
     }
 
-    private fun replySms(ctx: Context, to: String, msg: String) {
-        try {
+    /**
+     * Normalisasi nomor HP agar bisa dibandingkan:
+     * buang non-digit, samakan format Indonesia 62xxxxxxxxxx -> 0xxxxxxxxxx.
+     */
+    private fun normPhone(p: String): String {
+        var d = p.filter { it.isDigit() }
+        if (d.startsWith("62")) d = "0" + d.substring(2)
+        return d
+    }
+
+    private fun replySms(ctx: Context, to: String, msg: String) {        try {
             val sm = if (Build.VERSION.SDK_INT >= 31) {
                 ctx.getSystemService(SmsManager::class.java)
             } else {

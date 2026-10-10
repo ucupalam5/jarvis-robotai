@@ -1,8 +1,10 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_controller.dart';
+import 'market_service.dart';
 import 'memory_service.dart';
 import 'overlay_service.dart';
+import 'weather_service.dart';
 
 /// Hasil parsing perintah suara -> aksi lokal atau lempar ke AI.
 class ParsedCommand {
@@ -71,6 +73,8 @@ const Map<String, String> appMap = {
   'setelan': 'com.android.settings',
   'play store': 'com.android.vending',
   'playstore': 'com.android.vending',
+  'tradingview': 'com.tradingview.tradingviewapp',
+  'trading view': 'com.tradingview.tradingviewapp',
 };
 
 ParsedCommand parseLocalCommand(String rawText) {
@@ -366,9 +370,18 @@ ParsedCommand parseLocalCommand(String rawText) {
     if (num != null) {
       var h = int.parse(num.group(1)!);
       var m = num.group(2) != null ? int.parse(num.group(2)!) : 0;
-      if (t.contains('siang') || t.contains('sore') || t.contains('malam')) {
-        if (h < 12) h += 12;
-        if (h == 24) h = 12;
+      // Konversi 12-jam -> 24-jam yang benar:
+      // "jam 12 siang" = 12, "jam 12 malam"/"jam 12 pagi" = 0 (tengah malam).
+      final isPagi = t.contains('pagi');
+      if (t.contains('siang') ||
+          t.contains('sore') ||
+          t.contains('malam') ||
+          isPagi) {
+        if (h == 12) {
+          h = (isPagi || t.contains('malam')) ? 0 : 12;
+        } else if (h < 12) {
+          h = isPagi ? h : h + 12;
+        }
       }
       if (h > 23 || m > 59) {
         return ParsedCommand(
@@ -749,10 +762,25 @@ ParsedCommand parseLocalCommand(String rawText) {
   if (s.startsWith('ingatkan ') || s.startsWith('ingetin ')) {
     final rem = _parseReminder(s);
     if (rem == null) {
+      // Slot-filling: kalau isi ada tapi waktu tidak terparse, tanya balik
+      // jam berapa (protokol ASK:), jangan cuma menampilkan contoh.
+      final body = s
+          .replaceFirst(RegExp(r'^(ingatkan|ingetin)\s+'), '')
+          .trim();
+      if (body.isEmpty) {
+        return ParsedCommand(
+          handledLocally: true,
+          reply:
+              'Sir, contohnya: ingatkan minum obat dalam 10 menit. Atau: ingatkan rapat jam 7 pagi.',
+        );
+      }
       return ParsedCommand(
         handledLocally: true,
+        // ASK:<jenis>|<data>|<pertanyaan> -> home_screen mengucapkan
+        // pertanyaan, mendengar jawaban sekali, lalu memanggil
+        // resolveReminderSlot(body, jawaban).
         reply:
-            'Sir, contohnya: ingatkan minum obat dalam 10 menit. Atau: ingatkan rapat jam 7 pagi.',
+            'ASK:SLOT_REMINDER|$body|Jam berapa saya ingatkan "$body", Sir?',
       );
     }
     final at = rem['at'] as int;
@@ -760,19 +788,7 @@ ParsedCommand parseLocalCommand(String rawText) {
     return ParsedCommand(
       handledLocally: true,
       reply: 'Memasang pengingat, Sir.',
-      action: () async {
-        final id = DateTime.now().millisecondsSinceEpoch;
-        final r = await AppController.setReminder(id, at, body);
-        if (r != 'OK') return 'SAY:$r';
-        final sp = await SharedPreferences.getInstance();
-        final list = sp.getStringList('jarvis_reminders') ?? [];
-        list.add('$id|$at|$body');
-        await sp.setStringList('jarvis_reminders', list);
-        final when = DateTime.fromMillisecondsSinceEpoch(at);
-        final hh = when.hour.toString().padLeft(2, '0');
-        final mm = when.minute.toString().padLeft(2, '0');
-        return 'SAY:Siap Sir, diingatkan "$body" jam $hh lewat $mm.';
-      },
+      action: () => simpanPengingat(body, at),
     );
   }
   if (has(['lihat pengingat', 'baca pengingat', 'daftar pengingat'])) {
@@ -928,7 +944,43 @@ ParsedCommand parseLocalCommand(String rawText) {
     );
   }
 
-  // --- BRIEFING PAGI (jam + tanggal + baterai, 100% offline) ---
+  // --- SKILL TRADINGVIEW: "harga bitcoin berapa?" / "harga saham bbca" ---
+  // Kripto via Binance (gratis), saham IDX via Stooq (gratis). Tanpa API key.
+  if (t.contains('harga') || t.contains('berapa harga') || t.contains('cek harga')) {
+    final crypto = MarketService.findCrypto(t);
+    if (crypto.isNotEmpty) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Mengecek harga pasar, Sir.',
+        action: () async {
+          final info = await MarketService.cryptoPrice(crypto);
+          if (info.isEmpty) {
+            return 'SAY:Sir, harga $crypto tidak dapat diambil saat ini. Cek internet ya.';
+          }
+          return 'SAY:$info';
+        },
+      );
+    }
+    // Pola saham: "harga saham bbca" / "saham tlkm berapa"
+    final sm = RegExp(r'saham\s+([a-z]{3,5})').firstMatch(t);
+    if (sm != null) {
+      final ticker = sm.group(1)!;
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'Mengecek harga saham, Sir.',
+        action: () async {
+          final info = await MarketService.stockPrice(ticker);
+          if (info.isEmpty) {
+            return 'SAY:Sir, harga saham ${ticker.toUpperCase()} tidak dapat diambil saat ini.';
+          }
+          return 'SAY:$info';
+        },
+      );
+    }
+  }
+
+  // --- BRIEFING PAGI (jam + tanggal + baterai + cuaca + pengingat hari ini) ---
+  // Cuaca via Open-Meteo (gratis, tanpa key). Gagal -> briefing tetap jalan.
   if (has(['briefing', 'laporan pagi', 'info pagi', 'ringkasan pagi'])) {
     return ParsedCommand(
       handledLocally: true,
@@ -950,8 +1002,34 @@ ParsedCommand parseLocalCommand(String rawText) {
           final m = RegExp(r'BATERAI:(\d+)').firstMatch(r);
           if (m != null) bat = ', baterai ${m.group(1)} persen';
         } catch (_) {}
+        // Cuaca hari ini (boleh gagal diam-diam).
+        final cuaca = await WeatherService.todaySummary();
+        // Pengingat yang jatuh hari ini.
+        var agenda = '';
+        try {
+          final sp = await SharedPreferences.getInstance();
+          final list = sp.getStringList('jarvis_reminders') ?? [];
+          final today = <String>[];
+          for (final e in list) {
+            final p = e.split('|');
+            if (p.length < 3) continue;
+            final at = int.tryParse(p[1]) ?? 0;
+            final dt = DateTime.fromMillisecondsSinceEpoch(at);
+            if (dt.year == now.year &&
+                dt.month == now.month &&
+                dt.day == now.day) {
+              today.add(
+                  '${dt.hour.toString().padLeft(2, '0')}.${dt.minute.toString().padLeft(2, '0')}: ${p.sublist(2).join('|')}');
+            }
+          }
+          if (today.isNotEmpty) {
+            agenda = 'Pengingat hari ini: ${today.join('; ')}. ';
+          }
+        } catch (_) {}
+        final cuacaPart = cuaca.isEmpty ? '' : '$cuaca';
         return 'SAY:Selamat pagi Sir. Hari ${hari[now.weekday - 1]}, '
             '${now.day} ${bulan[now.month]} ${now.year}, jam $hh lewat $mm$bat. '
+            '$cuacaPart$agenda'
             'Ada yang bisa saya bantu?';
       },
     );
@@ -1242,10 +1320,15 @@ Map<String, dynamic>? _parseReminder(String s) {
     var h = int.parse(jam.group(1)!);
     final m = jam.group(2) != null ? int.parse(jam.group(2)!) : 0;
     final suf = jam.group(3) ?? '';
-    if ((suf == 'siang' || suf == 'sore' || suf == 'malam') && h < 12) {
-      h += 12;
+    // Konversi 12-jam -> 24-jam yang benar:
+    // "jam 12 siang" = 12, "jam 12 malam" = 0 (tengah malam).
+    if (suf == 'siang' || suf == 'sore' || suf == 'malam' || suf == 'pagi') {
+      if (h == 12) {
+        h = (suf == 'pagi' || suf == 'malam') ? 0 : 12;
+      } else if (h < 12 && suf != 'pagi') {
+        h += 12;
+      }
     }
-    if (suf == 'pagi' && h == 12) h = 0;
     if (h > 23 || m > 59) return null;
     var at = DateTime(now.year, now.month, now.day, h, m);
     if (!at.isAfter(now)) at = at.add(const Duration(days: 1));
@@ -1254,6 +1337,44 @@ Map<String, dynamic>? _parseReminder(String s) {
     return {'at': at.millisecondsSinceEpoch, 'text': _cap(body)};
   }
   return null;
+}
+
+/// Simpan pengingat (dipakai jalur normal maupun slot-filling).
+/// Return string protokol SAY: untuk diucapkan.
+/// Dibuat top-level agar bisa dipakai ulang oleh resolveReminderSlot.
+Future<String> simpanPengingat(String body, int at) async {
+  final id = DateTime.now().millisecondsSinceEpoch;
+  final r = await AppController.setReminder(id, at, body);
+  if (r != 'OK') return 'SAY:$r';
+  final sp = await SharedPreferences.getInstance();
+  final list = sp.getStringList('jarvis_reminders') ?? [];
+  list.add('$id|$at|$body');
+  await sp.setStringList('jarvis_reminders', list);
+  final when = DateTime.fromMillisecondsSinceEpoch(at);
+  final hh = when.hour.toString().padLeft(2, '0');
+  final mm = when.minute.toString().padLeft(2, '0');
+  return 'SAY:Siap Sir, diingatkan "$body" jam $hh lewat $mm.';
+}
+
+/// Lanjutan slot-filling pengingat: user sudah menyebut isi ([body]),
+/// lalu menjawab pertanyaan jam ([timeText], mis. "jam 7 pagi" / "7" /
+/// "dalam 10 menit"). Return ParsedCommand siap eksekusi, atau null bila
+/// waktu tetap tidak terparse (home_screen akan meminta contoh format).
+ParsedCommand? resolveReminderSlot(String body, String timeText) {
+  var t = timeText.toLowerCase().trim();
+  // Toleransi jawaban pendek: "7 pagi" -> "jam 7 pagi".
+  if (!t.contains('jam') && !t.contains('dalam') && !t.contains('menit')) {
+    t = 'jam $t';
+  }
+  final rem = _parseReminder('ingatkan $body $t');
+  if (rem == null) return null;
+  final at = rem['at'] as int;
+  final b = rem['text'] as String;
+  return ParsedCommand(
+    handledLocally: true,
+    reply: 'Memasang pengingat, Sir.',
+    action: () => simpanPengingat(b, at),
+  );
 }
 
 String _cap(String s) =>
