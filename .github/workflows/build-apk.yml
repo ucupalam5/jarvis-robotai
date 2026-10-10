@@ -1,7 +1,7 @@
 name: Build Jarvis APK
 
-Build APK Flutter TANPA PC — cukup push dari HP via browser GitHub.
-Hasil: Actions > Artifacts > jarvis-app-release > app-release.apk (siap install)
+#Build APK Flutter TANPA PC — cukup push dari HP via browser GitHub.
+#Hasil: Actions > Artifacts > jarvis-app-release > app-release.apk (siap install)
 on:
   push:
     branches: [main, master]
