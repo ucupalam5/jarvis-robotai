@@ -1,7 +1,7 @@
 name: Build Jarvis APK
 
-# Build APK Flutter TANPA PC — cukup push dari HP via browser GitHub.
-# Hasil: Actions > Artifacts > jarvis-app-release > app-release.apk (siap install)
+Build APK Flutter TANPA PC — cukup push dari HP via browser GitHub.
+Hasil: Actions > Artifacts > jarvis-app-release > app-release.apk (siap install)
 on:
   push:
     branches: [main, master]
@@ -10,7 +10,7 @@ on:
     types: [published]
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -57,3 +57,20 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14
           if-no-files-found: error
+
+      # --- Auto-release: tiap versi baru di pubspec -> GitHub Release + APK.
+      # Aplikasi di HP otomatis mendeteksi & menawarkan update (tanpa hapus data).
+      - name: Buat GitHub Release otomatis
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d+ -f1 | tr -d ' ')
+          TAG="v$VER"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG sudah ada, skip."
+            exit 0
+          fi
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          gh release create "$TAG" "$APK" \
+            --title "JARVIS $TAG" \
+            --notes "Update otomatis tersedia di aplikasi: buka JARVIS lalu tap Update saat dialog muncul. Tanpa hapus data."
