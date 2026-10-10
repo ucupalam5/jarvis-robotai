@@ -1,6 +1,7 @@
 package com.jarvis.robotai
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.DownloadManager
@@ -9,6 +10,7 @@ import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.app.usage.UsageStatsManager
 import android.bluetooth.BluetoothAdapter
+import android.location.LocationManager
 import android.content.ContentValues
 import android.content.ComponentName
 import android.content.Context
@@ -209,6 +211,7 @@ class MainActivity : FlutterActivity() {
                     // --- SMS darurat + lokasi (find-my-phone) ---
                     "requestSms" -> requestSms(result)
                     "requestLoc" -> requestLoc(result)
+                    "getLocation" -> getLocation(result)
                     // --- Kuasa tulis pengaturan (kecerahan, timeout, rotasi) ---
                     "writeCheck" -> result.success(writeStatus())
                     "writeRequest" -> {
@@ -1157,6 +1160,40 @@ class MainActivity : FlutterActivity() {
             ),
             LOC_REQ
         )
+    }
+
+    /** Lokasi terakhir (untuk geofence). Return "LOKASI:lat,lon" atau "ERR:...". */
+    @SuppressLint("MissingPermission")
+    private fun getLocation(result: MethodChannel.Result) {
+        try {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.ACCESS_FINE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.ACCESS_COARSE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                result.success("ERR:izin lokasi belum diberikan")
+                return
+            }
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER
+            )
+            for (p in providers) {
+                try {
+                    val loc = lm.getLastKnownLocation(p)
+                    if (loc != null) {
+                        result.success("LOKASI:${loc.latitude},${loc.longitude}")
+                        return
+                    }
+                } catch (_: Exception) {}
+            }
+            result.success("ERR:lokasi tidak tersedia (nyalakan GPS)")
+        } catch (e: Exception) {
+            result.success("ERR:${e.message}")
+        }
     }
 
     /** Nyalakan service Telegram bila token+chat ada, else matikan. */
