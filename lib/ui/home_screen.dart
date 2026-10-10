@@ -14,6 +14,7 @@ import '../core/routine_service.dart';
 import '../core/geofence_service.dart';
 import '../core/cronfeed_service.dart';
 import '../core/farestai_link.dart';
+import '../core/remote_cmd_service.dart';
 import '../core/groq_service.dart';
 import '../core/market_service.dart';
 import '../core/memory_service.dart';
@@ -94,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final RoutineService _routines;
   late final GeofenceService _geofence;
   late final CronFeedService _cronfeed;
+  late final RemoteCmdService _remotecmd;
   bool _livingReady = false;
   bool _wakeOn = false;
   bool _proactiveOn = true;
@@ -137,6 +139,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _geofence.onGeofence = _onLivingMessage;
     _cronfeed = CronFeedService(widget.voice);
     _cronfeed.onFeed = (title, text) => _onLivingMessage('$title: $text');
+    _remotecmd = RemoteCmdService();
+    _remotecmd.onCommand = _execRemoteCommand;
+    _remotecmd.start();
     _proactive.start();
     _routines.start();
     _geofence.start();
@@ -144,6 +149,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_feedOn) _cronfeed.start();
     _pullSharedMemory();
     _livingReady = true;
+  }
+
+  /// Eksekusi perintah remote dari FarestAI (server).
+  Future<String> _execRemoteCommand(
+      String action, Map<String, dynamic> args) async {
+    try {
+      switch (action) {
+        case 'say':
+          final t = (args['text'] ?? '').toString();
+          if (t.isEmpty) return '';
+          _onLivingMessage('[FarestAI] $t');
+          if (!_silent) {
+            if (mounted) setState(() => _orbState = OrbState.speaking);
+            await widget.voice.speak(t);
+            if (mounted) setState(() => _orbState = OrbState.idle);
+          }
+          return t;
+        case 'open_app':
+          final kw = (args['keyword'] ?? '').toString();
+          final r = await AppController.openApp(kw)
+              .timeout(const Duration(seconds: 10));
+          final msg = r == 'OK'
+              ? '[FarestAI] Membuka $kw, Sir.'
+              : '[FarestAI] Gagal buka $kw.';
+          _onLivingMessage(msg);
+          return msg;
+        case 'run_routine':
+          final nm = (args['name'] ?? '').toString();
+          if (!_livingReady) return '';
+          final msg = '[FarestAI] ${await _routines.runByName(nm)}';
+          _onLivingMessage(msg);
+          return msg;
+        default:
+          return '';
+      }
+    } catch (_) {
+      return '';
+    }
   }
 
   /// Pesan proaktif / rutin / geofence / cron masuk ke chat.
@@ -213,6 +256,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _routines.stop();
       _geofence.stop();
       _cronfeed.stop();
+      _remotecmd.stop();
     }
     _patCtrl.dispose();
     if (_handsfree) {
@@ -630,6 +674,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return on
           ? 'Wake word aktif, Sir. Panggil "Hey Jarvis" kapan saja.'
           : 'Wake word mati, Sir.';
+    }
+    if (res == 'FARESTAI_STATUS:') {
+      final sp = await SharedPreferences.getInstance();
+      final hasPat = (sp.getString('github_pat') ?? '').isNotEmpty;
+      final mem = sp.getString('shared_memory_text') ?? '';
+      if (!hasPat) {
+        return 'FarestAI belum terhubung, Sir. Isi GitHub token di Settings > FarestAI Link dulu ya (cukup sekali).';
+      }
+      if (mem.isEmpty) {
+        return 'Token sudah ada, Sir, tapi memori bersama belum ketarik. Cek internet lalu buka tutup aplikasi ya.';
+      }
+      return 'FarestAI terhubung dan aktif, Sir. Memori bersama sinkron. Bilang "tanya farestai" kalau mau tanya sesuatu ke dia.';
     }
     if (res == 'OK') return reply;
     // AKURASI: kalau app tidak ketemu, cari label terdekat (Levenshtein)
