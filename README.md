@@ -14,7 +14,8 @@ Aplikasi Flutter + Groq AI (gratis) + Voice (Indonesia) + Popup Overlay + Kontro
   - "volume naik / turun"
   - "ingatkan minum obat jam 7 pagi" — kalau jamnya tidak jelas, Jarvis **tanya balik** (slot-filling) lalu memasang pengingat
   - "briefing pagi" — jam + tanggal + baterai + **cuaca hari ini (Open-Meteo, gratis)** + pengingat hari ini
-- Selain itu -> dijawab Groq AI gaya Jarvis Indonesia campur Inggris, dengan **function calling**: AI bisa mengeksekusi aksi (pasang pengingat/alarm, buka aplikasi, cek cuaca/baterai/jam), bukan cuma menjawab teks
+  - **Skill TradingView**: "harga bitcoin berapa?" / "harga saham bbca" — harga kripto real-time (Binance, gratis) + saham IDX (Stooq, gratis), dibacakan via suara. "buka tradingview" membuka aplikasinya.
+- Selain itu -> dijawab Groq AI gaya Jarvis Indonesia campur Inggris, dengan **function calling**: AI bisa mengeksekusi aksi (pasang pengingat/alarm, buka aplikasi, cek cuaca/baterai/jam, cek harga kripto/saham), bukan cuma menjawab teks
 - Popup RobotAI melayang di atas aplikasi lain (tombol overlay di AppBar)
 - Simpan Groq API key di Settings (SharedPreferences)
 - SMS darurat find-my-phone: kode + **allowlist nomor tepercaya** (opsional, di Settings)
@@ -44,6 +45,7 @@ lib/
   core/overlay_service.dart    -> config popup
   core/update_service.dart     -> cek update GitHub Release (versi otomatis)
   core/weather_service.dart    -> cuaca Open-Meteo (gratis, tanpa key)
+  core/market_service.dart     -> skill TradingView: harga kripto (Binance) + saham IDX (Stooq), gratis tanpa key
   ui/home_screen.dart          -> layar utama + chat + settings
   ui/jarvis_orb.dart           -> animasi orb reactor
   ui/onboarding.dart
