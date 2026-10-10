@@ -86,8 +86,32 @@ class VoiceService {
     if (!ttsReady) return;
     try {
       await tts.stop();
-      await tts.speak(text);
+      await tts.speak(_cleanForTts(text));
     } catch (_) {}
+  }
+
+  /// Bersihkan teks sebelum diucapkan: AI kadang mengembalikan markdown
+  /// (*tebal*, # judul, `kode`, [link](url)) yang terdengar aneh bila
+  /// dibaca mentah oleh TTS.
+  static String _cleanForTts(String s) {
+    var t = s;
+    // Link markdown [teks](url) -> teks saja.
+    t = t.replaceAllMapped(
+        RegExp(r'\[([^\]]+)\]\([^)]+\)'), (m) => m.group(1) ?? '');
+    // Sisa simbol markdown.
+    t = t.replaceAll(RegExp(r'[*_#`>~|]'), '');
+    // Header "## Judul" yang lolos -> buang # di awal baris.
+    t = t.replaceAll(RegExp(r'^#{1,6}\s*', multiLine: true), '');
+    // Daftar "1. " / "- " di awal baris -> rapikan jadi koma.
+    t = t.replaceAll(RegExp(r'^\s*(\d+[.)]|[-•])\s*', multiLine: true), '');
+    // URL mentah -> jangan dibaca.
+    t = t.replaceAll(RegExp(r'https?://\S+'), 'tautan');
+    // Whitespace berlebih.
+    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (t.isEmpty) return 'Sir.';
+    // Batasi panjang agar TTS tidak ngomong kepanjangan.
+    if (t.length > 900) t = '${t.substring(0, 900)}...';
+    return t;
   }
 
   Future<void> stopSpeak() async {
