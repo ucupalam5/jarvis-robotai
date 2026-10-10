@@ -1,5 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'farestai_link.dart';
+import 'geofence_service.dart';
+
 import 'app_controller.dart';
 import 'market_service.dart';
 import 'memory_service.dart';
@@ -116,6 +119,124 @@ ParsedCommand parseLocalCommand(String rawText) {
         final ok = await OverlayService.show();
         return ok ? 'OK' : 'SAY:Popup gagal tampil. Aktifkan: Settings HP > Apps > JARVIS > Display over other apps > Allow.';
       },
+    );
+  }
+
+  // --- FARESTAI LINK: tanya ke otak dalam (jawab ~10-15 menit) ---
+  if (s.startsWith('tanya farestai') || s.startsWith('tanya farest ai')) {
+    final q = s.replaceFirst(RegExp(r'^tanya farest\s?ai\s*'), '').trim();
+    if (q.isEmpty) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'ASK:FARESTAI_ASK||Mau tanya apa ke FarestAI, Sir?',
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Meneruskan pertanyaan ke FarestAI, Sir.',
+      action: () async => 'SAY:${await FarestAiLink.askQuestion(q)}',
+    );
+  }
+  // --- FARESTAI LINK: titip fakta ke memori bersama ---
+  if (s.startsWith('ingat ini') ||
+      s.startsWith('inget ini') ||
+      s.startsWith('catat ini')) {
+    final f =
+        s.replaceFirst(RegExp(r'^(ingat|inget|catat) ini\s*:?\s*'), '').trim();
+    if (f.isEmpty) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply: 'ASK:FARESTAI_REMEMBER||Apa yang harus saya ingat, Sir?',
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mencatat ke memori, Sir.',
+      action: () async => 'SAY:${await FarestAiLink.rememberFact(f)}',
+    );
+  }
+  // --- RINGKAS NOTIFIKASI pakai AI (lokal, langsung jalan) ---
+  if (has([
+    'ringkas notifikasi',
+    'ringkasan notifikasi',
+    'rangkum notifikasi',
+    'notifikasi ringkas',
+    'ada notif apa',
+    'bacakan ringkasan notif'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Meringkas notifikasi, Sir.',
+      action: () async => 'SUMMARIZE:',
+    );
+  }
+  // --- RUTINITAS: buka layar ---
+  if (has([
+    'buka rutinitas',
+    'buka rutin',
+    'lihat rutinitas',
+    'daftar rutin',
+    'tambah rutin',
+    'rutin baru',
+    'buat rutin',
+    'jadwal rutin'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Membuka layar rutinitas, Sir.',
+      action: () async => 'OPEN_ROUTINES:',
+    );
+  }
+  // --- GEOFENCE: tandai lokasi saat ini ---
+  if (s.startsWith('ingat lokasi') || s.startsWith('tandai lokasi')) {
+    final label =
+        s.replaceFirst(RegExp(r'^(ingat|tandai) lokasi\s*'), '').trim();
+    if (label.isEmpty) {
+      return ParsedCommand(
+        handledLocally: true,
+        reply:
+            'ASK:GEOFENCE_ADD||Lokasi apa yang mau ditandai, Sir? (Saya tandai posisi HP sekarang.)',
+      );
+    }
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menandai lokasi, Sir.',
+      action: () async =>
+          'SAY:${await GeofenceService.addHere(label, 'Anda sampai di $label, Sir.')}',
+    );
+  }
+  if (s.startsWith('lupakan lokasi') || s.startsWith('hapus lokasi')) {
+    final label =
+        s.replaceFirst(RegExp(r'^(lupakan|hapus) lokasi\s*'), '').trim();
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menghapus tanda lokasi, Sir.',
+      action: () async => 'GEOFENCE_REMOVE:$label',
+    );
+  }
+  // --- WAKE WORD via suara ---
+  if (has([
+    'nyalakan wake word',
+    'aktifkan wake word',
+    'wake word nyala',
+    'hey jarvis nyala'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Menyalakan wake word, Sir.',
+      action: () async => 'WAKEWORD:1',
+    );
+  }
+  if (has([
+    'matikan wake word',
+    'nonaktifkan wake word',
+    'wake word mati',
+    'hey jarvis mati'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mematikan wake word, Sir.',
+      action: () async => 'WAKEWORD:0',
     );
   }
 

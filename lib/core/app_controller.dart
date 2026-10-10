@@ -80,6 +80,7 @@ class AppController {
   // --- SMS darurat + lokasi (find-my-phone) ---
   static Future<String> requestSms() => _invoke('requestSms');
   static Future<String> requestLoc() => _invoke('requestLoc');
+  static Future<String> getLocation() => _invoke('getLocation');
 
   // --- Kuasa penuh: tulis pengaturan, statistik, baterai, DND, asisten ---
   static Future<String> writeCheck() => _invoke('writeCheck');
