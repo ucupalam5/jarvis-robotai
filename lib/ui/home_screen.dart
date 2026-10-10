@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,10 +9,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
 import '../core/groq_service.dart';
+import '../core/market_service.dart';
 import '../core/memory_service.dart';
 import '../core/overlay_service.dart';
 import '../core/update_service.dart';
 import '../core/voice_service.dart';
+import '../core/weather_service.dart';
 import 'jarvis_orb.dart';
 import 'onboarding.dart';
 import 'power_screen.dart';
@@ -38,6 +41,18 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final List<ChatMsg> _chat = [ChatMsg('jarvis', 'Halo Sir, saya JARVIS. Tap orb dan bicara, Sir. Contoh: "buka WhatsApp", "kunci layar".')];
   final List<Map<String, String>> _history = [];
+  /// Batas memori chat sesi ini (dipotong dari depan bila lewat).
+  static const int _historyMax = 60;
+
+  /// Tambah riwayat chat + potong otomatis agar tidak tumbuh tanpa batas
+  /// di sesi panjang.
+  void _addHistory(String user, String assistant) {
+    _history.add({'role': 'user', 'content': user});
+    _history.add({'role': 'assistant', 'content': assistant});
+    if (_history.length > _historyMax) {
+      _history.removeRange(0, _history.length - _historyMax);
+    }
+  }
   bool _listening = false;
   bool _speaking = false;
   bool _busy = false;
@@ -60,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _appIcon = 'cyan';
   String _loadingBg = '';
   final _sosCtrl = TextEditingController();
+  final _sosTrustedCtrl = TextEditingController();
   final _tgTokenCtrl = TextEditingController();
   final _tgChatCtrl = TextEditingController();
   bool _autoRead = false;
@@ -235,6 +251,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _appIcon = sp.getString('app_icon') ?? 'cyan';
     _loadingBg = sp.getString('loading_bg') ?? '';
     _sosCtrl.text = sp.getString('sos_code') ?? 'JARVIS123';
+    _sosTrustedCtrl.text = sp.getString('sos_trusted') ?? '';
     _tgTokenCtrl.text = sp.getString('tg_token') ?? '';
     _tgChatCtrl.text = sp.getString('tg_chat') ?? '';
     _autoRead = sp.getBool('notif_read_auto') ?? false;
@@ -427,8 +444,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         res.substring('VISION:'.length),
         'Lihat gambar screenshot layar HP ini. Jelaskan singkat dalam Bahasa Indonesia apa yang tampil dan info pentingnya, maksimal 3 kalimat. Panggil user Sir.',
       );
-      _history.add({'role': 'user', 'content': text});
-      _history.add({'role': 'assistant', 'content': ans});
+      _addHistory(text, ans);
       return ans;
     }
     if (res.startsWith('SAY:')) return res.substring('SAY:'.length);
@@ -465,6 +481,257 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     return '$reply (catatan: $res)';
+  }
+
+  /// Selesaikan protokol tanya-jawab: ASK:<jenis>|<data>|<pertanyaan>.
+  /// Ucapkan pertanyaan, dengar jawaban sekali, lalu teruskan ke resolver.
+  Future<String> _resolveAsk(String ask) async {
+    final parts = ask.substring('ASK:'.length).split('|');
+    if (parts.length < 3) return 'Sir, saya kurang paham maksudnya.';
+    final kind = parts[0];
+    final data = parts[1];
+    final question = parts.sublist(2).join('|');
+    if (mounted) {
+      setState(() {
+        _chat.add(ChatMsg('jarvis', question));
+      });
+      _scrollDown();
+    }
+    await widget.voice.speak(question);
+    final answer = await _listenForAnswer();
+    if (answer.isEmpty) {
+      return 'Sir, saya tidak mendengar jawabannya. Coba ulangi perintahnya ya.';
+    }
+    if (kind == 'SLOT_REMINDER') {
+      final pc = resolveReminderSlot(data, answer);
+      if (pc == null) {
+        return 'Sir, waktunya kurang jelas. Contoh: jam 7 pagi, atau dalam 10 menit.';
+      }
+      return await _runLocal(answer, pc);
+    }
+    return 'Sir, saya kurang paham maksudnya.';
+  }
+
+  /// Dengar SATU jawaban (untuk tanya-jawab slot). Return teks final,
+  /// atau string kosong bila timeout / tidak terdengar.
+  Future<String> _listenForAnswer() async {
+    final completer = Completer<String>();
+    var finished = false;
+    void finish(String v) {
+      if (!finished) {
+        finished = true;
+        if (!completer.isCompleted) completer.complete(v);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _listening = true;
+        _draft = 'Menunggu jawaban, Sir...';
+      });
+    }
+    unawaited(widget.voice.listenOnce(onResult: (txt, finalR, alts) async {
+      if (mounted) setState(() => _draft = txt.isEmpty ? 'Menunggu jawaban, Sir...' : txt);
+      if (finalR) {
+        await widget.voice.stopListen();
+        finish(txt.trim());
+      }
+    }));
+    // Timeout pengaman 25 detik.
+    Future.delayed(const Duration(seconds: 25), () => finish(''));
+    final ans = await completer.future;
+    if (mounted) {
+      setState(() {
+        _listening = false;
+        _level = 0;
+      });
+    }
+    return ans;
+  }
+
+  /// Daftar tool yang boleh dipanggil AI via function calling.
+  /// Format OpenAI-compatible (didukung Groq).
+  static const List<Map<String, dynamic>> _jarvisTools = [
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_time',
+        'description': 'Jam, tanggal, dan hari saat ini di HP user.',
+        'parameters': {'type': 'object', 'properties': {}},
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_battery',
+        'description': 'Level baterai HP user saat ini.',
+        'parameters': {'type': 'object', 'properties': {}},
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_weather',
+        'description': 'Cuaca hari ini (Jakarta).',
+        'parameters': {'type': 'object', 'properties': {}},
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'open_app',
+        'description': 'Buka aplikasi di HP user berdasarkan kata kunci.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'keyword': {
+              'type': 'string',
+              'description': 'Nama aplikasi, mis. whatsapp, youtube.',
+            },
+          },
+          'required': ['keyword'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'set_alarm',
+        'description': 'Pasang alarm di HP user.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'hour': {'type': 'integer', 'description': 'Jam 0-23.'},
+            'minute': {'type': 'integer', 'description': 'Menit 0-59.'},
+            'label': {'type': 'string', 'description': 'Label alarm.'},
+          },
+          'required': ['hour', 'minute'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_crypto_price',
+        'description':
+            'Harga kripto real-time (USD) + perubahan 24 jam. keyword: bitcoin, ethereum, solana, bnb, xrp, doge, dsb.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'keyword': {'type': 'string', 'description': 'Nama kripto.'},
+          },
+          'required': ['keyword'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_stock_price',
+        'description': 'Harga saham Indonesia (IDX, Rupiah). ticker: BBCA, BBRI, TLKM, dsb.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'ticker': {'type': 'string', 'description': 'Kode saham.'},
+          },
+          'required': ['ticker'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'set_reminder',
+        'description':
+            'Pasang pengingat berjadwal di HP user. Isi SALAH SATU dari minutes_from_now atau time_hhmm.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'text': {'type': 'string', 'description': 'Isi pengingat.'},
+            'minutes_from_now': {
+              'type': 'integer',
+              'description': 'Berapa menit dari sekarang.',
+            },
+            'time_hhmm': {
+              'type': 'string',
+              'description': 'Jam "HH:MM" 24-jam, hari ini (atau besok bila sudah lewat).',
+            },
+          },
+          'required': ['text'],
+        },
+      },
+    },
+  ];
+
+  /// Eksekutor tool untuk function calling: jembatani AI -> aksi nyata.
+  Future<String> _execTool(String name, Map<String, dynamic> args) async {
+    switch (name) {
+      case 'get_time':
+        const hari = [
+          'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'
+        ];
+        const bulan = [
+          '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+          'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ];
+        final now = DateTime.now();
+        return 'Sekarang hari ${hari[now.weekday - 1]}, ${now.day} ${bulan[now.month]} ${now.year}, '
+            'jam ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}.';
+      case 'get_battery':
+        return await AppController.getBattery();
+      case 'get_weather':
+        final w = await WeatherService.todaySummary();
+        return w.isEmpty ? 'Info cuaca tidak tersedia saat ini.' : w;
+      case 'get_crypto_price':
+        final kw = (args['keyword'] ?? '').toString();
+        if (kw.isEmpty) return 'keyword kosong.';
+        final cp = await MarketService.cryptoPrice(kw);
+        return cp.isEmpty
+            ? 'Harga $kw tidak dapat diambil saat ini.'
+            : cp;
+      case 'get_stock_price':
+        final tk = (args['ticker'] ?? '').toString();
+        if (tk.isEmpty) return 'ticker kosong.';
+        final sp2 = await MarketService.stockPrice(tk);
+        return sp2.isEmpty
+            ? 'Harga saham ${tk.toUpperCase()} tidak dapat diambil saat ini.'
+            : sp2;
+      case 'open_app':
+        final kw = (args['keyword'] ?? '').toString();
+        if (kw.isEmpty) return 'keyword kosong.';
+        return await AppController.openApp(kw);
+      case 'set_alarm':
+        final h = (args['hour'] as num?)?.toInt() ?? -1;
+        final m = (args['minute'] as num?)?.toInt() ?? 0;
+        if (h < 0 || h > 23 || m < 0 || m > 59) {
+          return 'Jam alarm tidak valid (hour 0-23, minute 0-59).';
+        }
+        final label = (args['label'] ?? 'Jarvis').toString();
+        return await AppController.setAlarm(h, m, label);
+      case 'set_reminder':
+        final body = (args['text'] ?? '').toString().trim();
+        int? at;
+        final mins = (args['minutes_from_now'] as num?)?.toInt();
+        final hhmm = (args['time_hhmm'] ?? '').toString().trim();
+        if (mins != null && mins > 0) {
+          at = DateTime.now()
+              .add(Duration(minutes: mins))
+              .millisecondsSinceEpoch;
+        } else if (RegExp(r'^\d{1,2}:\d{2}$').hasMatch(hhmm)) {
+          final p = hhmm.split(':');
+          final now = DateTime.now();
+          var dt = DateTime(
+              now.year, now.month, now.day, int.parse(p[0]), int.parse(p[1]));
+          if (!dt.isAfter(now)) dt = dt.add(const Duration(days: 1));
+          at = dt.millisecondsSinceEpoch;
+        }
+        if (at == null || body.isEmpty) {
+          return 'Parameter kurang: butuh text + salah satu (minutes_from_now / time_hhmm).';
+        }
+        return await simpanPengingat(body, at);
+      default:
+        return 'Tool tidak dikenal: $name.';
+    }
   }
 
   /// Cache daftar app sekali saat buka (untuk fallback fuzzy).
@@ -533,7 +800,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return best;
   }
 
-  /// Cek internet cepat TANPA plugin (lookup DNS 4 detik).
+  /// Cek internet: DNS dulu (cepat), fallback HTTPS bila DNS diblokir.
+  /// Di jaringan yang memblokir DNS eksternal, lookup 8.8.8.8 gagal padahal
+  /// internet ada -> jangan langsung vonis offline.
   bool _online = true;
 
   Future<bool> _isOnline() async {
@@ -541,6 +810,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final r = await InternetAddress.lookup('8.8.8.8')
           .timeout(const Duration(seconds: 4));
       _online = r.isNotEmpty && r.first.rawAddress.isNotEmpty;
+      if (_online) {
+        if (mounted) setState(() {});
+        return true;
+      }
+    } catch (_) {
+      // lanjut ke fallback HTTPS
+    }
+    try {
+      final res = await http
+          .get(Uri.parse('https://www.google.com/generate_204'))
+          .timeout(const Duration(seconds: 5));
+      _online = res.statusCode == 204;
     } catch (_) {
       _online = false;
     }
@@ -637,16 +918,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String reply;
     if (cmd.handledLocally) {
       reply = await _runLocal(text, cmd);
+      // Protokol ASK: perintah butuh info tambahan -> tanya balik via suara.
+      if (reply.startsWith('ASK:')) {
+        reply = await _resolveAsk(reply);
+      }
     } else if (!await _isOnline()) {
       // OFFLINE: jangan buang waktu timeout ke Groq. Perintah lokal tetap jalan.
       reply =
           'Sir, lagi offline. Perintah HP (buka app, kunci, senter, hitung, catat) tetap jalan. AI butuh internet ya Sir.';
     } else {
-      // 2) Selain itu -> tanya ke Groq AI + memori jangka panjang.
+      // 2) Selain itu -> Groq AI + FUNCTION CALLING: AI boleh MENGEKSEKUSI
+      // tool (pengingat, alarm, buka app, cuaca, baterai, jam), bukan cuma
+      // menjawab teks. Perintah lokal regex tetap prioritas (offline).
       final mem = await MemoryService.summary();
-      reply = await widget.groq.chat(text, _history, memory: mem);
-      _history.add({'role': 'user', 'content': text});
-      _history.add({'role': 'assistant', 'content': reply});
+      reply = await widget.groq.chatWithTools(
+        text,
+        _history,
+        _jarvisTools,
+        _execTool,
+        memory: mem,
+      );
+      _addHistory(text, reply);
     }
 
     setState(() {
@@ -807,7 +1099,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (chosen != txt && mounted) {
             setState(() => _draft = chosen!);
           }
-          await _runLocal(chosen!, chosenCmd);
+          var localReply = await _runLocal(chosen!, chosenCmd);
+          // Protokol ASK: perintah butuh info tambahan -> tanya balik.
+          if (localReply.startsWith('ASK:')) {
+            localReply = await _resolveAsk(localReply);
+          }
+          if (mounted) {
+            setState(() {
+              _chat.add(ChatMsg('jarvis', localReply));
+            });
+            _scrollDown();
+          }
+          // Ucapkan balasan perintah lokal (sebelumnya hilang begitu saja).
+          // Mode handsfree / senyap: jangan bersuara (hindari feedback mic).
+          if (!_silent && !_handsfree && localReply.trim().isNotEmpty) {
+            if (mounted) setState(() => _speaking = true);
+            await widget.voice.speak(localReply);
+            if (mounted) setState(() => _speaking = false);
+          }
         } else if (txt.trim().isNotEmpty) {
           gotSomething = true;
           await _handleText(txt);
@@ -1858,6 +2167,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 8),
+            const Text('Nomor tepercaya SOS (opsional, keamanan):',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text(
+                'Pisahkan dengan koma, mis. 08123456789, 08987654321. Kalau diisi, SMS SOS dari nomor lain DIABAIKAN walau kodenya benar. Kosongkan = siapa pun berkode bisa memicu (kurang aman).',
+                style: TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _sosTrustedCtrl,
+              style: const TextStyle(color: Colors.white),
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                hintText: '0812xxxxxxx, 0898xxxxxxx',
+                hintStyle: TextStyle(color: Colors.white30),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.cyanAccent)),
+              ),
+            ),
+            const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () async {
                 final code = _sosCtrl.text.trim().toUpperCase();
@@ -1872,12 +2202,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
                 final sp = await SharedPreferences.getInstance();
                 await sp.setString('sos_code', code);
+                await sp.setString(
+                    'sos_trusted', _sosTrustedCtrl.text.trim());
                 final a = await AppController.requestSms();
                 final b = await AppController.requestLoc();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(a == 'OK' && b == 'OK'
-                          ? 'Kode tersimpan + izin OK, Sir.'
+                          ? 'Kode + nomor tepercaya tersimpan, Sir.'
                           : '$a | $b')));
                 }
               },
