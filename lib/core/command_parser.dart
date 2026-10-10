@@ -155,6 +155,22 @@ ParsedCommand parseLocalCommand(String rawText) {
       action: () async => 'SAY:${await FarestAiLink.rememberFact(f)}',
     );
   }
+  // --- CEK KONEKSI FARESTAI (apakah "dia" sudah masuk) ---
+  if (has([
+    'cek koneksi farestai',
+    'apakah farestai terhubung',
+    'farestai terhubung',
+    'cek farestai',
+    'apakah kamu terhubung ke farestai',
+    'apakah lu udah masuk',
+    'kamu udah masuk belum'
+  ])) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Mengecek koneksi FarestAI, Sir.',
+      action: () async => 'FARESTAI_STATUS:',
+    );
+  }
   // --- RINGKAS NOTIFIKASI pakai AI (lokal, langsung jalan) ---
   if (has([
     'ringkas notifikasi',
