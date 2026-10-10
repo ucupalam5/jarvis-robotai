@@ -137,6 +137,20 @@ ParsedCommand parseLocalCommand(String rawText) {
       action: () async => 'SAY:${await FarestAiLink.askQuestion(q)}',
     );
   }
+  // --- FARESTAI LINK: tugas berat (cariin loker + apply) ---
+  if ((s.startsWith('cariin loker') || s.startsWith('carikan loker') ||
+          s.startsWith('cari loker') || s.startsWith('apply loker') ||
+          (s.contains('cari') && s.contains('loker')) ||
+          (s.contains('carikan') && s.contains('kerja'))) &&
+      !s.contains('tanya farestai')) {
+    return ParsedCommand(
+      handledLocally: true,
+      reply: 'Meneruskan tugas cari loker ke FarestAI, Sir.',
+      action: () async =>
+          'SAY:${await FarestAiLink.sendTask('job_search', s)}',
+    );
+  }
+
   // --- FARESTAI LINK: titip fakta ke memori bersama ---
   if (s.startsWith('ingat ini') ||
       s.startsWith('inget ini') ||

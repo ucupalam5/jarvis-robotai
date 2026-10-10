@@ -122,6 +122,39 @@ class FarestAiLink {
     return 'Siap, Sir. Pertanyaan diteruskan ke FarestAI. Jawabannya butuh beberapa menit — saya kabari begitu datang.';
   }
 
+  /// Kirim tugas berat ke FarestAI (dikerjakan di server).
+  /// kind: 'job_search' (cariin + apply loker), dst.
+  static Future<String> sendTask(String kind, String detail) async {
+    final pat = await _pat();
+    if (pat == null) {
+      return 'Belum ada GitHub token, Sir. Isi di Settings > FarestAI Link dulu ya.';
+    }
+    final inbox = await _readJson('farestai-inbox.json', pat);
+    if (inbox == null) {
+      return 'Gagal buka kotak pesan FarestAI, Sir. Cek internet / token ya.';
+    }
+    final tasks = (inbox['tasks'] as List?) ?? [];
+    final open = tasks.where((t) => (t as Map)['status'] == 'open').length;
+    if (open >= 3) {
+      return 'FarestAI lagi sibuk (3 tugas antre), Sir. Tunggu selesai dulu ya.';
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    tasks.add({
+      'id': 't$now',
+      'at': now ~/ 1000,
+      'from': 'jarvis-app',
+      'kind': kind,
+      'detail': detail,
+      'status': 'open',
+    });
+    inbox['tasks'] = tasks;
+    final ok = await _writeJson('farestai-inbox.json', inbox,
+        (inbox['_sha'] ?? '').toString(), pat,
+        message: 'jarvis: tugas baru untuk FarestAI ($kind)');
+    if (!ok) return 'Gagal kirim tugas ke FarestAI, Sir. Coba lagi ya.';
+    return 'Siap, Sir. Tugas diteruskan ke FarestAI. Saya kabari begitu selesai dikerjakan.';
+  }
+
   /// Titip fakta ke memori FarestAI.
   static Future<String> rememberFact(String fact) async {
     final pat = await _pat();
