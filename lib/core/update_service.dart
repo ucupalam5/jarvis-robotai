@@ -1,18 +1,31 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 
 /// Auto-update dari GitHub Release (tanpa hapus-install manual).
-/// PENTING: samakan kAppVersion dengan pubspec + tag release terbaru
-/// setiap kali rilis, kalau tidak app akan tawarkan update ke diri sendiri.
+/// Versi app dibaca OTOMATIS dari pubspec via package_info_plus,
+/// jadi tidak perlu lagi disinkron manual setiap rilis.
 class UpdateService {
-  static const String kAppVersion = '2.1.0';
+  /// Fallback bila package_info gagal (jangan diandalkan).
+  static const String kFallbackVersion = '2.1.0';
   static const String kRepo = 'ucupalam5/jarvis-robotai';
   static const String _latestUrl =
       'https://api.github.com/repos/$kRepo/releases/latest';
 
+  /// Versi app yang sedang berjalan, mis. "2.1.0" (tanpa build number).
+  static Future<String> appVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final v = info.version.trim();
+      if (v.isNotEmpty) return v;
+    } catch (_) {}
+    return kFallbackVersion;
+  }
+
   /// Return (adaUpdate, tag, urlApk, catatan).
   static Future<(bool, String, String, String)> check() async {
+    final current = await appVersion();
     try {
       final res = await http.get(Uri.parse(_latestUrl)).timeout(
             const Duration(seconds: 15),
@@ -25,7 +38,7 @@ class UpdateService {
       }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final tag = (data['tag_name'] ?? '').toString();
-      if (tag.isEmpty || !_isNewer(tag, kAppVersion)) {
+      if (tag.isEmpty || !_isNewer(tag, current)) {
         return (false, tag, '', 'Sudah versi terbaru.');
       }
       String url = '';
