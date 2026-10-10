@@ -8,6 +8,12 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_controller.dart';
 import '../core/command_parser.dart';
+import '../core/wakeword_service.dart';
+import '../core/proactive_service.dart';
+import '../core/routine_service.dart';
+import '../core/geofence_service.dart';
+import '../core/cronfeed_service.dart';
+import '../core/farestai_link.dart';
 import '../core/groq_service.dart';
 import '../core/market_service.dart';
 import '../core/memory_service.dart';
@@ -16,6 +22,8 @@ import '../core/update_service.dart';
 import '../core/voice_service.dart';
 import '../core/weather_service.dart';
 import 'jarvis_orb.dart';
+import 'routines_screen.dart';
+import 'permissions_screen.dart';
 import 'onboarding.dart';
 import 'power_screen.dart';
 
@@ -54,7 +62,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
   bool _listening = false;
-  bool _speaking = false;
   bool _busy = false;
   String _draft = '';
   final _apiCtrl = TextEditingController();
@@ -80,6 +87,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _tgChatCtrl = TextEditingController();
   bool _autoRead = false;
   String _notif = '...';
+  // --- JARVIS HIDUP ---
+  OrbState _orbState = OrbState.idle;
+  late final WakeWordService _wakeword;
+  late final ProactiveService _proactive;
+  late final RoutineService _routines;
+  late final GeofenceService _geofence;
+  late final CronFeedService _cronfeed;
+  bool _livingReady = false;
+  bool _wakeOn = false;
+  bool _proactiveOn = true;
+  bool _proactiveVoice = true;
+  bool _followupOn = false;
+  bool _feedOn = true;
+  bool _feedVoice = true;
+  String _sharedMemory = '';
+  int _followUpDepth = 0;
+  final _patCtrl = TextEditingController();
 
   static const List<String> _popColors = [
     '00D4FF', // cyan Jarvis
@@ -96,9 +120,101 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadKey();
   }
 
+  /// Inisialisasi layanan "JARVIS hidup". Dipanggil sekali dari _loadKey.
+  void _initLiving() {
+    if (_livingReady) return;
+    _wakeword = WakeWordService(widget.voice);
+    _wakeword.onWake = () {
+      if (!mounted) return;
+      setState(() => _orbState = OrbState.wake);
+      _tapOrb();
+    };
+    _proactive = ProactiveService(widget.voice);
+    _proactive.onProactive = _onLivingMessage;
+    _routines = RoutineService();
+    _routines.onRoutine = _onLivingMessage;
+    _geofence = GeofenceService();
+    _geofence.onGeofence = _onLivingMessage;
+    _cronfeed = CronFeedService(widget.voice);
+    _cronfeed.onFeed = (title, text) => _onLivingMessage('$title: $text');
+    _proactive.start();
+    _routines.start();
+    _geofence.start();
+    if (_wakeOn) _wakeword.start();
+    if (_feedOn) _cronfeed.start();
+    _pullSharedMemory();
+    _livingReady = true;
+  }
+
+  /// Pesan proaktif / rutin / geofence / cron masuk ke chat.
+  void _onLivingMessage(String text) {
+    if (!mounted) return;
+    setState(() => _chat.add(ChatMsg('jarvis', text)));
+    _scrollDown();
+  }
+
+  /// Tarik memori bersama dari FarestAI (tiap 6 jam).
+  Future<void> _pullSharedMemory() async {
+    try {
+      final t = await FarestAiLink.pullSharedMemory();
+      if (t.isNotEmpty && mounted) {
+        setState(() => _sharedMemory = t);
+      }
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('shared_memory_text', t);
+    } catch (_) {}
+    Future.delayed(const Duration(hours: 6), () {
+      if (mounted) _pullSharedMemory();
+    });
+  }
+
+  /// Gabungkan memori lokal + memori bersama untuk Groq.
+  String _memoryForAi(String local) {
+    if (_sharedMemory.isEmpty) return local;
+    return '$local\n\nFakta dari FarestAI (memori bersama):\n$_sharedMemory';
+  }
+
+  /// Setelah menjawab, tawarkan lanjutan tanpa tap ulang (max 2x).
+  /// Hanya saat percakapan suara (wake word / handsfree aktif).
+  Future<void> _maybeFollowUp() async {
+    if (_followUpDepth >= 2) {
+      _followUpDepth = 0;
+      return;
+    }
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (!(sp.getBool('followup_on') ?? false)) return;
+      if (!mounted || _silent || _busy) return;
+      if (!_wakeword.isRunning && !_handsfree) return;
+      _followUpDepth++;
+      if (mounted) setState(() => _draft = 'Ada lagi, Sir?');
+      if (mounted) setState(() => _listening = true);
+      final heard = await _listenForAnswer();
+      if (mounted) {
+        setState(() {
+          _listening = false;
+          _draft = '';
+        });
+      }
+      if (heard.isNotEmpty && mounted) {
+        await _handleText(heard);
+      } else if (mounted) {
+        setState(() => _orbState = OrbState.idle);
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_livingReady) {
+      _wakeword.stop();
+      _proactive.stop();
+      _routines.stop();
+      _geofence.stop();
+      _cronfeed.stop();
+    }
+    _patCtrl.dispose();
     if (_handsfree) {
       _handsfree = false;
       AppController.handsfreeWake(false);
@@ -255,6 +371,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _tgTokenCtrl.text = sp.getString('tg_token') ?? '';
     _tgChatCtrl.text = sp.getString('tg_chat') ?? '';
     _autoRead = sp.getBool('notif_read_auto') ?? false;
+    _wakeOn = sp.getBool('wakeword_on') ?? false;
+    _proactiveOn = sp.getBool('proactive_on') ?? true;
+    _proactiveVoice = sp.getBool('proactive_voice') ?? true;
+    _followupOn = sp.getBool('followup_on') ?? false;
+    _feedOn = sp.getBool('cronfeed_on') ?? true;
+    _feedVoice = sp.getBool('cronfeed_voice') ?? true;
+    _patCtrl.text = sp.getString('github_pat') ?? '';
+    _sharedMemory = sp.getString('shared_memory_text') ?? '';
+    _initLiving();
     final pop = await OverlayService.readConfig();
     _popIcon = pop['icon'] ?? _popIcon;
     _popColor = pop['color'] ?? _popColor;
@@ -468,6 +593,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (res.startsWith('BATERAI_REPLY:')) {
       return res.substring('BATERAI_REPLY:'.length);
     }
+    // --- JARVIS HIDUP markers ---
+    if (res == 'SUMMARIZE:') {
+      return await _summarizeNotifs();
+    }
+    if (res == 'OPEN_ROUTINES:') {
+      if (mounted) {
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const RoutinesScreen()));
+      }
+      return 'Membuka layar rutinitas, Sir. Atur jam, hari, dan aksinya di sana.';
+    }
+    if (res.startsWith('GEOFENCE_REMOVE:')) {
+      final label = res.substring('GEOFENCE_REMOVE:'.length).trim();
+      final items = await GeofenceService.load();
+      items.removeWhere((e) =>
+          (e['label'] ?? '').toString().toLowerCase() ==
+          label.toLowerCase());
+      await GeofenceService.save(items);
+      return label.isEmpty
+          ? 'Sebutkan nama lokasinya, Sir. Contoh: "lupakan lokasi kantor".'
+          : 'Tanda lokasi $label dihapus, Sir.';
+    }
+    if (res == 'WAKEWORD:1' || res == 'WAKEWORD:0') {
+      final on = res == 'WAKEWORD:1';
+      final sp = await SharedPreferences.getInstance();
+      await sp.setBool('wakeword_on', on);
+      if (mounted) setState(() => _wakeOn = on);
+      if (_livingReady) {
+        if (on) {
+          _wakeword.start();
+        } else {
+          _wakeword.stop();
+        }
+      }
+      return on
+          ? 'Wake word aktif, Sir. Panggil "Hey Jarvis" kapan saja.'
+          : 'Wake word mati, Sir.';
+    }
     if (res == 'OK') return reply;
     // AKURASI: kalau app tidak ketemu, cari label terdekat (Levenshtein)
     // dari daftar app HP lalu buka otomatis.
@@ -501,6 +664,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final answer = await _listenForAnswer();
     if (answer.isEmpty) {
       return 'Sir, saya tidak mendengar jawabannya. Coba ulangi perintahnya ya.';
+    }
+    if (kind == 'FARESTAI_ASK') {
+      return await FarestAiLink.askQuestion(answer);
+    }
+    if (kind == 'FARESTAI_REMEMBER') {
+      return await FarestAiLink.rememberFact(answer);
+    }
+    if (kind == 'GEOFENCE_ADD') {
+      return await GeofenceService.addHere(
+          answer, 'Anda sampai di $answer, Sir.');
     }
     if (kind == 'SLOT_REMINDER') {
       final pc = resolveReminderSlot(data, answer);
@@ -661,6 +834,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'summarize_notifications',
+        'description':
+            'Ringkas notifikasi HP terakhir (WA/Telegram/SMS) jadi maksimal 3 kalimat Bahasa Indonesia.',
+        'parameters': {'type': 'object', 'properties': {}},
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'run_routine',
+        'description':
+            'Jalankan rutinitas terjadwal buatan user berdasarkan namanya.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'name': {'type': 'string', 'description': 'Nama rutin.'},
+          },
+          'required': ['name'],
+        },
+      },
+    },
   ];
 
   /// Eksekutor tool untuk function calling: jembatani AI -> aksi nyata.
@@ -729,8 +926,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return 'Parameter kurang: butuh text + salah satu (minutes_from_now / time_hhmm).';
         }
         return await simpanPengingat(body, at);
+      case 'summarize_notifications':
+        return await _summarizeNotifs();
+      case 'run_routine':
+        final nm = (args['name'] ?? '').toString();
+        if (nm.isEmpty) return 'nama rutin kosong.';
+        if (!_livingReady) return 'Layanan rutin belum siap, Sir.';
+        return await _routines.runByName(nm);
       default:
         return 'Tool tidak dikenal: $name.';
+    }
+  }
+
+  /// Ringkas notifikasi terakhir pakai AI.
+  Future<String> _summarizeNotifs() async {
+    try {
+      final raw = await AppController.notifLast()
+          .timeout(const Duration(seconds: 10));
+      if (raw.trim().isEmpty || raw.startsWith('ERR')) {
+        return 'Tidak ada notifikasi terbaca, Sir. Aktifkan akses notifikasi dulu ya.';
+      }
+      final mem = _memoryForAi(await MemoryService.summary());
+      if (mounted) setState(() => _orbState = OrbState.thinking);
+      try {
+        return await widget.groq.chat(
+          'Ringkas notifikasi HP berikut jadi maksimal 3 kalimat Bahasa Indonesia santai. '
+          'Sebut hanya yang penting (chat, info penting). Abaikan promo/iklan/sistem. '
+          'Kalau tidak ada yang penting, bilang "tidak ada yang penting".'
+          '\n\n$raw',
+          [],
+          memory: mem,
+        );
+      } finally {
+        if (mounted) setState(() => _orbState = OrbState.idle);
+      }
+    } catch (_) {
+      return 'Gagal meringkas notifikasi, Sir.';
     }
   }
 
@@ -930,14 +1161,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // 2) Selain itu -> Groq AI + FUNCTION CALLING: AI boleh MENGEKSEKUSI
       // tool (pengingat, alarm, buka app, cuaca, baterai, jam), bukan cuma
       // menjawab teks. Perintah lokal regex tetap prioritas (offline).
-      final mem = await MemoryService.summary();
-      reply = await widget.groq.chatWithTools(
-        text,
-        _history,
-        _jarvisTools,
-        _execTool,
-        memory: mem,
-      );
+      final mem = _memoryForAi(await MemoryService.summary());
+      if (mounted) setState(() => _orbState = OrbState.thinking);
+      try {
+        reply = await widget.groq.chatWithTools(
+          text,
+          _history,
+          _jarvisTools,
+          _execTool,
+          memory: mem,
+        );
+      } finally {
+        if (mounted) setState(() => _orbState = OrbState.idle);
+      }
       _addHistory(text, reply);
     }
 
@@ -947,12 +1183,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     _scrollDown();
     if (_silent) {
-      if (mounted) setState(() => _speaking = false);
       return;
     }
-    setState(() => _speaking = true);
+    if (mounted) setState(() => _orbState = OrbState.speaking);
     await widget.voice.speak(reply);
-    if (mounted) setState(() => _speaking = false);
+    if (mounted) {
+      setState(() {
+        _orbState = OrbState.idle;
+      });
+    }
+    // Follow-up: lanjut dengar tanpa tap ulang (kalau aktif).
+    await _maybeFollowUp();
   }
 
   Future<void> _tapOrb() async {
@@ -1056,6 +1297,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _listening = true;
+        _orbState = OrbState.listening;
         _draft = isRetry ? 'Ulangi dengar, Sir...' : 'Mendengarkan...';
         _level = 0;
       });
@@ -1079,6 +1321,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) setState(() {
           _listening = false;
           _level = 0;
+          _orbState = OrbState.idle;
         });
         // AKURASI: coba teks utama + semua tebakan STT ke perintah lokal.
         // Tebakan pertama yang cocok yang dijalankan.
@@ -1113,9 +1356,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Ucapkan balasan perintah lokal (sebelumnya hilang begitu saja).
           // Mode handsfree / senyap: jangan bersuara (hindari feedback mic).
           if (!_silent && !_handsfree && localReply.trim().isNotEmpty) {
-            if (mounted) setState(() => _speaking = true);
+            if (mounted) setState(() => _orbState = OrbState.speaking);
             await widget.voice.speak(localReply);
-            if (mounted) setState(() => _speaking = false);
+            if (mounted) setState(() => _orbState = OrbState.idle);
           }
         } else if (txt.trim().isNotEmpty) {
           gotSomething = true;
@@ -1270,7 +1513,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           GestureDetector(
             onTap: _busy ? null : _tapOrb,
-            child: JarvisOrb(listening: _listening, speaking: _speaking),
+            child: JarvisOrb(state: _orbState, level: _level),
           ),
           const SizedBox(height: 6),
           Text(
@@ -1930,6 +2173,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _livingSwitch(String label, String sub, bool value,
+      ValueChanged<bool> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 13)),
+                Text(sub,
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 11)),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            activeColor: Colors.cyanAccent,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openSettings() {
     String selTheme = _loadingTheme;
     String selAppIcon = _appIcon;
@@ -2115,6 +2387,118 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Text('✓ Background galeri aktif.',
                   style: TextStyle(
                       color: Colors.greenAccent, fontSize: 12)),
+            const Divider(color: Colors.white24),
+            const Text('JARVIS HIDUP:',
+                style: TextStyle(
+                    color: Colors.cyanAccent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            _livingSwitch('Wake word "Hey Jarvis"',
+                'Dengar terus di background (boros baterai).', _wakeOn,
+                (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('wakeword_on', v);
+              if (mounted) setState(() => _wakeOn = v);
+              if (_livingReady) (v ? _wakeword.start() : _wakeword.stop());
+            }),
+            _livingSwitch('Proaktif',
+                'Sapa pagi, peringatan baterai, nudge pengingat.',
+                _proactiveOn, (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('proactive_on', v);
+              if (mounted) setState(() => _proactiveOn = v);
+            }),
+            _livingSwitch('Suara proaktif',
+                'Sapaan & nudge dibacakan suara (kalau mati: teks saja).',
+                _proactiveVoice, (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('proactive_voice', v);
+              if (mounted) setState(() => _proactiveVoice = v);
+            }),
+            _livingSwitch('Follow-up otomatis',
+                'Setelah jawab, lanjut dengar 8 detik.', _followupOn,
+                (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('followup_on', v);
+              if (mounted) setState(() => _followupOn = v);
+            }),
+            _livingSwitch('Papan pengumuman FarestAI',
+                'Umumkan tugas selesai dari server (tiap 15 mnt).', _feedOn,
+                (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('cronfeed_on', v);
+              if (mounted) setState(() => _feedOn = v);
+              if (_livingReady) (v ? _cronfeed.start() : _cronfeed.stop());
+            }),
+            _livingSwitch('Suara pengumuman',
+                'Pengumuman papan dibacakan suara.', _feedVoice, (v) async {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('cronfeed_voice', v);
+              if (mounted) setState(() => _feedVoice = v);
+            }),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.cyanAccent,
+                        foregroundColor: Colors.black),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const RoutinesScreen()));
+                    },
+                    child: const Text('Rutinitas'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurpleAccent,
+                        foregroundColor: Colors.white),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PermissionsScreen()));
+                    },
+                    child: const Text('Izin'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('GitHub token (FarestAI Link):',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const Text(
+                'Buat di github.com > Settings > Developer settings > Personal access tokens > fine-grained (repo ini saja, Contents: read+write). Cukup sekali.',
+                style: TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _patCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'ghp_xxx / github_pat_xxx',
+                hintStyle: TextStyle(color: Colors.white30),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onSubmitted: (v) async {
+                final sp = await SharedPreferences.getInstance();
+                await sp.setString('github_pat', v.trim());
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Token tersimpan.')));
+                }
+              },
+            ),
+            const SizedBox(height: 8),
             const Divider(color: Colors.white24),
             const Text('Bacakan pesan otomatis:',
                 style: TextStyle(color: Colors.white70, fontSize: 13)),
