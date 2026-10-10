@@ -247,6 +247,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  /// Mode reels: dengerin terus tanpa batas sampai "mode reels mati".
+  /// Biar hands-free: tiap selesai scroll langsung dengerin lagi.
+  Future<void> _reelsListen() async {
+    if (!_reelsMode || !mounted || _busy) return;
+    try {
+      if (mounted) setState(() => _listening = true);
+      final heard = await _listenForAnswer();
+      if (mounted) setState(() => _listening = false);
+      if (heard.isNotEmpty && mounted && _reelsMode) {
+        await _handleText(heard);
+      } else if (mounted) {
+        setState(() => _orbState = OrbState.idle);
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -628,6 +644,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (res == 'REELS:1') {
       if (mounted) setState(() => _reelsMode = true);
+      // Langsung dengerin biar hands-free tanpa tap.
+      _reelsListen();
       return 'Mode reels ON, Sir. Bilang lanjut, geser, skip, atau ganti. Suara saya matikan biar video lancar. "Mode reels mati" untuk keluar.';
     }
     if (res == 'REELS:0') {
@@ -1161,6 +1179,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           });
         }
         _scrollDown();
+        _reelsListen(); // dengerin lagi biar hands-free.
         return; // tanpa suara agar video tidak keganggu.
       }
     }
