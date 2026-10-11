@@ -105,11 +105,17 @@ class TgPollService : Service() {
             .setOngoing(true)
         if (pi != null) builder.setContentIntent(pi)
         val notif = builder.build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(
-                NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-            )
-        } else {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(NOTIF_ID, notif)
+            }
+        } catch (_: Exception) {
+            // Fallback: tanpa tipe khusus bila permission bermasalah.
             @Suppress("DEPRECATION")
             startForeground(NOTIF_ID, notif)
         }
