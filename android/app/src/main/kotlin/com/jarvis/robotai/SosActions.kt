@@ -213,4 +213,72 @@ object SosActions {
             "Jarvis: gagal pasang alarm. Format: ALARM 07:30 atau ALARM 45"
         }
     }
+
+    /** Nyalakan/matikan senter. */
+    fun setFlash(ctx: Context, on: Boolean): String {
+        return try {
+            val cm = ctx.getSystemService(Context.CAMERA_SERVICE)
+                as android.hardware.camera2.CameraManager
+            for (id in cm.cameraIdList) {
+                val c = cm.getCameraCharacteristics(id)
+                val hasFlash = c.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                if (hasFlash) {
+                    cm.setTorchMode(id, on)
+                    return if (on) "Jarvis: senter NYALA, Sir. 🔦"
+                    else "Jarvis: senter mati, Sir."
+                }
+            }
+            "Jarvis: HP ini tidak punya flash."
+        } catch (e: Exception) {
+            "Jarvis: gagal atur senter."
+        }
+    }
+
+    /** Cari kontak lalu telpon. Return pesan status. */
+    fun callContact(ctx: Context, name: String): String {
+        return try {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx, android.Manifest.permission.READ_CONTACTS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return "Jarvis: butuh izin kontak dulu, Sir."
+            }
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx, android.Manifest.permission.CALL_PHONE
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return "Jarvis: butuh izin telepon dulu, Sir."
+            }
+            val q = name.trim()
+            if (q.length < 2) return "Jarvis: nama kontak terlalu pendek."
+            // Nomor langsung?
+            val digits = q.filter { it.isDigit() || it == '+' }
+            var num: String? = null
+            var label: String? = null
+            if (digits.length >= 6 && digits.length >= q.length - 2) {
+                num = digits; label = digits
+            } else {
+                val uri = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+                val proj = arrayOf(
+                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val col = android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ?"
+                ctx.contentResolver.query(uri, proj, col, arrayOf("%$q%"), null)?.use {
+                    if (it.moveToFirst()) {
+                        label = it.getString(0) ?: q
+                        num = (it.getString(1) ?: "").filter { ch -> ch.isDigit() || ch == '+' }
+                    }
+                }
+            }
+            if (num.isNullOrBlank() || num!!.length < 6) {
+                return "Jarvis: kontak \"$q\" tidak ketemu."
+            }
+            val i = android.content.Intent(android.content.Intent.ACTION_CALL).apply {
+                data = android.net.Uri.parse("tel:$num")
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(i)
+            "Jarvis: menelpon $label, Sir. 📞"
+        } catch (e: Exception) {
+            "Jarvis: gagal menelpon."
+        }
+    }
 }

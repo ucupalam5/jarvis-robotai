@@ -102,7 +102,7 @@ class TgPollService : Service() {
         } catch (_: Exception) {}
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Jarvis remote standby")
-            .setContentText("Perintah Telegram: FIND / RING / LOCK.")
+            .setContentText("Perintah Telegram: FIND / RING / LOCK / FLASH / CALL.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
         if (pi != null) builder.setContentIntent(pi)
@@ -425,7 +425,7 @@ class TgPollService : Service() {
             }
             "STATUS", "START", "HALO", "HAI", "PING" -> tgSend(
                 token, chat,
-                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / SHOT / KAMERA / VOLUME / ALARM / BATERAI / JAM."
+                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / SHOT / KAMERA / FLASH / CALL / VOLUME / ALARM / BATERAI / JAM."
             )
             "SHOT", "FOTO", "SCREENSHOT", "SS" -> tgShot(token, chat)
             "KAMERA", "CAMERA", "CAM" -> {
@@ -437,6 +437,18 @@ class TgPollService : Service() {
                 val pct = arg.toIntOrNull() ?: 80
                 tgSend(token, chat, SosActions.setVolume(this, pct))
             }
+            "FLASH", "SENTER", "TORCH" -> {
+                val arg = raw.trim().split(Regex("\\s+")).drop(1).firstOrNull()?.uppercase() ?: "ON"
+                tgSend(token, chat, SosActions.setFlash(this, arg != "OFF" && arg != "MATI"))
+            }
+            "CALL", "TELPON", "TELEPON", "NELPON" -> {
+                val arg = raw.trim().split(Regex("\\s+")).drop(1).joinToString(" ")
+                if (arg.isBlank()) {
+                    tgSend(token, chat, "Format: CALL <nama kontak / nomor>. Contoh: CALL mama")
+                } else {
+                    tgSend(token, chat, SosActions.callContact(this, arg))
+                }
+            }
             "ALARM" -> {
                 val arg = raw.trim().split(Regex("\\s+")).drop(1).firstOrNull() ?: ""
                 if (arg.isBlank()) {
@@ -447,7 +459,7 @@ class TgPollService : Service() {
             }
             else -> tgSend(
                 token, chat,
-                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / SHOT / KAMERA / VOLUME / ALARM / BATERAI / JAM."
+                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / SHOT / KAMERA / FLASH / CALL / VOLUME / ALARM / BATERAI / JAM."
             )
         }
     }
