@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
-import '../version.dart';
 
 /// Auto-update dari GitHub Release (tanpa hapus-install manual).
 /// Versi app dibaca OTOMATIS dari pubspec via package_info_plus,
@@ -10,6 +9,8 @@ import '../version.dart';
 class UpdateService {
   /// Fallback bila package_info gagal (jangan diandalkan).
   static const String kFallbackVersion = '2.5.3';
+  /// Versi asli aplikasi - update tiap rilis.
+  static const String kAppVersion = '2.5.3';
   static const String kRepo = 'ucupalam5/jarvis-robotai';
   static const String _latestUrl =
       'https://api.github.com/repos/$kRepo/releases/latest';
@@ -18,7 +19,7 @@ class UpdateService {
   /// Prioritas: hardcoded AppVersion (selalu benar) -> PackageInfo -> fallback.
   static Future<String> appVersion() async {
     try {
-      final v = AppVersion.current.trim();
+      final v = kAppVersion.trim();
       if (v.isNotEmpty) return v;
     } catch (_) {}
     try {
