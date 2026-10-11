@@ -44,7 +44,23 @@ jobs:
       - name: Analyze (warning tidak menggagalkan build)
         run: flutter analyze || true
 
+      - name: Siapkan keystore permanen (bila secrets ada)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/jarvis-release.p12
+            echo "Keystore permanen dipasang."
+          else
+            echo "Secrets belum ada, pakai debug signing."
+          fi
+
       - name: Build APK release
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/android/app/jarvis-release.p12
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: flutter build apk --release -v
 
       - name: Cek hasil APK
