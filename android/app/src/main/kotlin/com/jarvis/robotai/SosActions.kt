@@ -187,30 +187,47 @@ object SosActions {
             val a = arg.trim()
             if (a.contains(":")) {
                 val p = a.split(":")
-                cal.set(java.util.Calendar.HOUR_OF_DAY, p[0].toInt())
-                cal.set(java.util.Calendar.MINUTE, p[1].toInt())
+                if (p.size < 2) return "Jarvis: format salah. Contoh: ALARM 07:30"
+                cal.set(java.util.Calendar.HOUR_OF_DAY, p[0].trim().toInt())
+                cal.set(java.util.Calendar.MINUTE, p[1].trim().toInt())
                 cal.set(java.util.Calendar.SECOND, 0)
                 if (cal.timeInMillis <= System.currentTimeMillis()) {
                     cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
                 }
             } else {
-                cal.add(java.util.Calendar.MINUTE, a.toInt())
+                val mins = a.toIntOrNull() ?: return "Jarvis: format salah. Contoh: ALARM 45"
+                cal.add(java.util.Calendar.MINUTE, mins)
             }
+            val hh = cal.get(java.util.Calendar.HOUR_OF_DAY)
+            val mm = cal.get(java.util.Calendar.MINUTE)
+            // Coba 1: intent alarm standar (tanpa skip UI biar kompatibel).
             val i = android.content.Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
-                putExtra(android.provider.AlarmClock.EXTRA_HOUR,
-                    cal.get(java.util.Calendar.HOUR_OF_DAY))
-                putExtra(android.provider.AlarmClock.EXTRA_MINUTES,
-                    cal.get(java.util.Calendar.MINUTE))
+                putExtra(android.provider.AlarmClock.EXTRA_HOUR, hh)
+                putExtra(android.provider.AlarmClock.EXTRA_MINUTES, mm)
                 putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Alarm Jarvis")
-                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            val pm = ctx.packageManager
+            val canHandle = try {
+                i.resolveActivity(pm) != null
+            } catch (_: Exception) { false }
+            if (!canHandle) {
+                // Coba 2: buka aplikasi jam biasa.
+                try {
+                    val i2 = android.content.Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    if (i2.resolveActivity(pm) != null) {
+                        ctx.startActivity(i2)
+                        return "Jarvis: aplikasi jam dibuka, pasang manual jam %02d:%02d ya Sir.".format(hh, mm)
+                    }
+                } catch (_: Exception) {}
+                return "Jarvis: HP ini tidak punya aplikasi alarm yang bisa dipasang otomatis."
+            }
             ctx.startActivity(i)
-            val hh = cal.get(java.util.Calendar.HOUR_OF_DAY).toString().padStart(2, '0')
-            val mm = cal.get(java.util.Calendar.MINUTE).toString().padStart(2, '0')
-            "Jarvis: alarm dipasang jam $hh:$mm, Sir."
+            "Jarvis: alarm dipasang jam %02d:%02d, Sir.".format(hh, mm)
         } catch (e: Exception) {
-            "Jarvis: gagal pasang alarm. Format: ALARM 07:30 atau ALARM 45"
+            "Jarvis: gagal pasang alarm (${e.message})."
         }
     }
 
