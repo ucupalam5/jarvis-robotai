@@ -81,6 +81,8 @@ class MainActivity : FlutterActivity() {
         if (intent?.getBooleanExtra("jarvis_autolisten", false) == true) {
             pendingAutolisten = true
         }
+        // Auto-nyalakan service Telegram tiap aplikasi dibuka (biar ga perlu Hubungkan ulang).
+        try { tgRestart() } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1202,10 +1204,12 @@ class MainActivity : FlutterActivity() {
             val sp = getSharedPreferences(
                 "FlutterSharedPreferences", Context.MODE_PRIVATE
             )
-            val token = sp.getString("tg_token", "")
-                ?: sp.getString("flutter.tg_token", "") ?: ""
-            val chat = sp.getString("tg_chat", "")
-                ?: sp.getString("flutter.tg_chat", "") ?: ""
+            val token = sp.getString("tg_token", "").let {
+                if (it.isNullOrBlank()) sp.getString("flutter.tg_token", "") else it
+            } ?: ""
+            val chat = sp.getString("tg_chat", "").let {
+                if (it.isNullOrBlank()) sp.getString("flutter.tg_chat", "") else it
+            } ?: ""
             val i = Intent(this, TgPollService::class.java)
             try {
                 stopService(i)
