@@ -41,4 +41,26 @@ android {
     }
 }
 
+// Decode icon robot dari base64 (teks) jadi PNG tiap build.
+// Solusi: GitHub API tidak bisa push binary dengan benar,
+// jadi icon disimpan sebagai teks base64 di robot-icon.b64.
+task decodeRobotIcon {
+    doLast {
+        def b64file = file("../../robot-icon.b64")
+        if (!b64file.exists()) {
+            println("robot-icon.b64 tidak ada, pakai icon bawaan.")
+            return
+        }
+        def bytes = java.util.Base64.getDecoder().decode(b64file.text.trim())
+        def densities = ["mipmap-mdpi", "mipmap-hdpi", "mipmap-xhdpi",
+                         "mipmap-xxhdpi", "mipmap-xxxhdpi"]
+        densities.each { d ->
+            def out = file("src/main/res/${d}/ic_launcher.png")
+            out.bytes = bytes
+            println("Icon ditulis: ${d}")
+        }
+    }
+}
+preBuild.dependsOn decodeRobotIcon
+
 flutter { source = "../.." }
