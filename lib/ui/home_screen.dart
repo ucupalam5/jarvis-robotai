@@ -253,7 +253,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_reelsMode || !mounted || _busy) return;
     try {
       if (mounted) setState(() => _listening = true);
+      // Duck: kecilkan suara video biar mic tidak terganggu.
+      try { await AppController.duckMedia(true); } catch (_) {}
       final heard = await _listenForAnswer();
+      try { await AppController.duckMedia(false); } catch (_) {}
       if (mounted) setState(() => _listening = false);
       if (heard.isNotEmpty && mounted && _reelsMode) {
         await _handleText(heard);
