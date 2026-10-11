@@ -59,13 +59,15 @@ class TgPollService : Service() {
         getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
     private fun tgToken(): String {
-        return prefs().getString("tg_token", "")
-            ?: prefs().getString("flutter.tg_token", "") ?: ""
+        val v1 = prefs().getString("tg_token", "")
+        if (!v1.isNullOrBlank()) return v1
+        return prefs().getString("flutter.tg_token", "") ?: ""
     }
 
     private fun tgChat(): String {
-        return prefs().getString("tg_chat", "")
-            ?: prefs().getString("flutter.tg_chat", "") ?: ""
+        val v1 = prefs().getString("tg_chat", "")
+        if (!v1.isNullOrBlank()) return v1
+        return prefs().getString("flutter.tg_chat", "") ?: ""
     }
 
     private fun markOk() {
