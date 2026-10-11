@@ -158,5 +158,6 @@ class AppController {
   static Future<String> toggleFlashlight(bool on) =>
       _invoke('flashlight', {'on': on});
   static Future<String> setVolumeUp() => _invoke('volumeUp');
+  static Future<String> duckMedia(bool on) => _invoke('duckMedia', {'on': on});
   static Future<String> setVolumeDown() => _invoke('volumeDown');
 }
