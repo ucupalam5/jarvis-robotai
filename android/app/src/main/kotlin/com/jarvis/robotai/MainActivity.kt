@@ -57,6 +57,7 @@ class MainActivity : FlutterActivity() {
     private var notifResult: MethodChannel.Result? = null
     private var camResult: MethodChannel.Result? = null
     private val NOTIF_REQ = 2004
+    private var savedMediaVol = -1
     private val CAM_REQ = 2005
     private val CONTACT_REQ = 2006
     private var contactResult: MethodChannel.Result? = null
@@ -110,6 +111,10 @@ class MainActivity : FlutterActivity() {
                         result.success(toggleFlashlight(on))
                     }
                     "volumeUp" -> result.success(volume(1))
+                    "duckMedia" -> {
+                        val on = call.argument<Boolean>("on") ?: true
+                        result.success(duckMedia(on))
+                    }
                     "volumeDown" -> result.success(volume(-1))
                     "wakeUp" -> result.success(wakeUp())
                     "getBattery" -> result.success(getBattery())
@@ -526,6 +531,27 @@ class MainActivity : FlutterActivity() {
             "OK"
         } catch (e: Exception) {
             "Gagal senter: ${e.message}"
+        }
+    }
+
+    /** Duck media: kecilkan volume saat dengar suara, balikin setelahnya (mode reels). */
+    private fun duckMedia(on: Boolean): String {
+        return try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (on) {
+                savedMediaVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                // Turunkan ke 10% biar STT tidak terganggu suara video.
+                val low = (am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.1).toInt().coerceAtLeast(1)
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+            } else {
+                if (savedMediaVol >= 0) {
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, savedMediaVol, 0)
+                    savedMediaVol = -1
+                }
+            }
+            "OK"
+        } catch (e: Exception) {
+            "Gagal duck: ${e.message}"
         }
     }
 
