@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- WAJIB agar muncul di daftar "Ubah pengaturan sistem" (kecerahan, timeout layar, rotasi) -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
