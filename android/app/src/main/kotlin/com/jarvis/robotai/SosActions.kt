@@ -165,4 +165,52 @@ object SosActions {
         val age = if (fresh || ageMin < 1) "baru saja" else "$ageMin mnt lalu"
         return "Jarvis di sini Sir: https://maps.google.com/?q=${b.latitude},${b.longitude} (GPS, $age)"
     }
+
+    /** Set volume media 0-100 persen. */
+    fun setVolume(ctx: Context, pct: Int): String {
+        return try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE)
+                as android.media.AudioManager
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val v = ((pct.coerceIn(0, 100) * max) / 100).coerceIn(0, max)
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0)
+            "Jarvis: volume diset $pct persen, Sir."
+        } catch (e: Exception) {
+            "Jarvis: gagal atur volume."
+        }
+    }
+
+    /** Pasang alarm via intent jam sistem. Format: "07:30" atau menit-dari-sekarang "45". */
+    fun setAlarm(ctx: Context, arg: String): String {
+        return try {
+            val cal = java.util.Calendar.getInstance()
+            val a = arg.trim()
+            if (a.contains(":")) {
+                val p = a.split(":")
+                cal.set(java.util.Calendar.HOUR_OF_DAY, p[0].toInt())
+                cal.set(java.util.Calendar.MINUTE, p[1].toInt())
+                cal.set(java.util.Calendar.SECOND, 0)
+                if (cal.timeInMillis <= System.currentTimeMillis()) {
+                    cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+            } else {
+                cal.add(java.util.Calendar.MINUTE, a.toInt())
+            }
+            val i = android.content.Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+                putExtra(android.provider.AlarmClock.EXTRA_HOUR,
+                    cal.get(java.util.Calendar.HOUR_OF_DAY))
+                putExtra(android.provider.AlarmClock.EXTRA_MINUTES,
+                    cal.get(java.util.Calendar.MINUTE))
+                putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Alarm Jarvis")
+                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(i)
+            val hh = cal.get(java.util.Calendar.HOUR_OF_DAY).toString().padStart(2, '0')
+            val mm = cal.get(java.util.Calendar.MINUTE).toString().padStart(2, '0')
+            "Jarvis: alarm dipasang jam $hh:$mm, Sir."
+        } catch (e: Exception) {
+            "Jarvis: gagal pasang alarm. Format: ALARM 07:30 atau ALARM 45"
+        }
+    }
 }
