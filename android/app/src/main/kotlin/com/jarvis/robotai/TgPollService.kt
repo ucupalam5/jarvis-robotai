@@ -260,6 +260,125 @@ class TgPollService : Service() {
         }
     }
 
+    /** Foto via kamera (depan/belakang) lalu kirim ke Telegram. */
+    private fun tgCamera(token: String, chat: String, front: Boolean) {
+        tgSend(token, chat, "Siap Sir, memotret...")
+        Thread {
+            try {
+                val cm = getSystemService(Context.CAMERA_SERVICE)
+                    as android.hardware.camera2.CameraManager
+                var camId: String? = null
+                for (id in cm.cameraIdList) {
+                    val c = cm.getCameraCharacteristics(id)
+                    val lens = c.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
+                    if (front && lens == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) { camId = id; break }
+                    if (!front && lens == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) { camId = id; break }
+                }
+                if (camId == null) {
+                    tgSend(token, chat, "Jarvis: kamera tidak ketemu.")
+                    return@Thread
+                }
+                val reader = android.media.ImageReader.newInstance(1280, 720,
+                    android.graphics.ImageFormat.JPEG, 1)
+                val latch = java.util.concurrent.CountDownLatch(1)
+                var jpg: ByteArray? = null
+                reader.setOnImageAvailableListener({ r ->
+                    try {
+                        val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                        val buf = img.planes[0].buffer
+                        val b = ByteArray(buf.remaining())
+                        buf.get(b)
+                        img.close()
+                        jpg = b
+                    } catch (_: Exception) {}
+                    latch.countDown()
+                }, android.os.Handler(android.os.Looper.getMainLooper()))
+                val hthread = android.os.HandlerThread("tgcam")
+                hthread.start()
+                val hhandler = android.os.Handler(hthread.looper)
+                var session: android.hardware.camera2.CameraCaptureSession? = null
+                try {
+                    if (checkSelfPermission(android.Manifest.permission.CAMERA)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        tgSend(token, chat, "Jarvis: izin kamera belum diberikan.")
+                        return@Thread
+                    }
+                    val clatch = java.util.concurrent.CountDownLatch(1)
+                    var device: android.hardware.camera2.CameraDevice? = null
+                    @Suppress("MissingPermission")
+                    cm.openCamera(camId, object : android.hardware.camera2.CameraDevice.StateCallback() {
+                        override fun onOpened(d: android.hardware.camera2.CameraDevice) { device = d; clatch.countDown() }
+                        override fun onDisconnected(d: android.hardware.camera2.CameraDevice) { clatch.countDown() }
+                        override fun onError(d: android.hardware.camera2.CameraDevice, e: Int) { clatch.countDown() }
+                    }, hhandler)
+                    clatch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                    val dev = device
+                    if (dev == null) {
+                        tgSend(token, chat, "Jarvis: gagal buka kamera.")
+                        return@Thread
+                    }
+                    val slatch = java.util.concurrent.CountDownLatch(1)
+                    dev.createCaptureSession(listOf(reader.surface),
+                        object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                            override fun onConfigured(s: android.hardware.camera2.CameraCaptureSession) { session = s; slatch.countDown() }
+                            override fun onConfigureFailed(s: android.hardware.camera2.CameraCaptureSession) { slatch.countDown() }
+                        }, hhandler)
+                    slatch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                    val sess = session
+                    if (sess == null) {
+                        tgSend(token, chat, "Jarvis: gagal siapkan kamera.")
+                        try { dev.close() } catch (_: Exception) {}
+                        return@Thread
+                    }
+                    val req = dev.createCaptureRequest(
+                        android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+                    req.addTarget(reader.surface)
+                    sess.capture(req.build(), null, hhandler)
+                    latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                    try { sess.close() } catch (_: Exception) {}
+                    try { dev.close() } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    tgSend(token, chat, "Jarvis: kamera error.")
+                }
+                try { hthread.quitSafely() } catch (_: Exception) {}
+                try { reader.close() } catch (_: Exception) {}
+                val bytes = jpg
+                if (bytes == null) {
+                    tgSend(token, chat, "Jarvis: gagal ambil foto.")
+                    return@Thread
+                }
+                // Kirim sebagai foto Telegram (pakai jalur yang sama dgn tgShot).
+                val boundary = "Jarvis${System.currentTimeMillis()}"
+                val url = java.net.URL("https://api.telegram.org/bot$token/sendPhoto")
+                val c = url.openConnection() as javax.net.ssl.HttpsURLConnection
+                c.requestMethod = "POST"
+                c.connectTimeout = 20000
+                c.readTimeout = 60000
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                c.outputStream.use { o ->
+                    val w = o.bufferedWriter(Charsets.UTF_8)
+                    w.write("--$boundary\r\n")
+                    w.write("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n")
+                    w.write("$chat\r\n")
+                    w.write("--$boundary\r\n")
+                    w.write("Content-Disposition: form-data; name=\"photo\"; filename=\"kamera.jpg\"\r\n")
+                    w.write("Content-Type: image/jpeg\r\n\r\n")
+                    w.flush()
+                    o.write(bytes)
+                    o.flush()
+                    w.write("\r\n--$boundary--\r\n")
+                    w.flush()
+                }
+                val code = c.responseCode
+                c.inputStream.use { it.readBytes() }
+                if (code != 200) tgSend(token, chat, "Jarvis: kirim foto gagal ($code).")
+            } catch (e: Exception) {
+                tgSend(token, chat, "Jarvis: kamera gagal.")
+            }
+        }.start()
+    }
+
     private fun tgSend(token: String, chat: String, text: String) {        try {
             val url = java.net.URL(
                 "https://api.telegram.org/bot$token/sendMessage"
@@ -306,12 +425,29 @@ class TgPollService : Service() {
             }
             "STATUS", "START", "HALO", "HAI", "PING" -> tgSend(
                 token, chat,
-                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / SHOT / BATERAI / JAM."
+                "Jarvis online, Sir. Perintah: FIND / RING / LOCK / SHOT / KAMERA / VOLUME / ALARM / BATERAI / JAM."
             )
             "SHOT", "FOTO", "SCREENSHOT", "SS" -> tgShot(token, chat)
+            "KAMERA", "CAMERA", "CAM" -> {
+                val arg = raw.trim().split(Regex("\\s+")).drop(1).firstOrNull()?.uppercase() ?: ""
+                tgCamera(token, chat, arg == "DEPAN" || arg == "FRONT")
+            }
+            "VOLUME", "VOL" -> {
+                val arg = raw.trim().split(Regex("\\s+")).drop(1).firstOrNull() ?: "80"
+                val pct = arg.toIntOrNull() ?: 80
+                tgSend(token, chat, SosActions.setVolume(this, pct))
+            }
+            "ALARM" -> {
+                val arg = raw.trim().split(Regex("\\s+")).drop(1).firstOrNull() ?: ""
+                if (arg.isBlank()) {
+                    tgSend(token, chat, "Format: ALARM 07:30 atau ALARM 45 (menit dari sekarang).")
+                } else {
+                    tgSend(token, chat, SosActions.setAlarm(this, arg))
+                }
+            }
             else -> tgSend(
                 token, chat,
-                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / SHOT / BATERAI / JAM."
+                "Perintah tidak dikenal, Sir. Coba: FIND / RING / LOCK / SHOT / KAMERA / VOLUME / ALARM / BATERAI / JAM."
             )
         }
     }
