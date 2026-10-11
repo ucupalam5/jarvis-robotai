@@ -8,9 +8,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 /// jadi tidak perlu lagi disinkron manual setiap rilis.
 class UpdateService {
   /// Fallback bila package_info gagal (jangan diandalkan).
-  static const String kFallbackVersion = '2.5.3';
+  static const String kFallbackVersion = '2.5.4';
   /// Versi asli aplikasi - update tiap rilis.
-  static const String kAppVersion = '2.5.3';
+  static const String kAppVersion = '2.5.4';
   static const String kRepo = 'ucupalam5/jarvis-robotai';
   static const String _latestUrl =
       'https://api.github.com/repos/$kRepo/releases/latest';
