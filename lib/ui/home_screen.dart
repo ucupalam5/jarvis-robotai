@@ -488,6 +488,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         return;
       }
+      final current = await UpdateService.appVersion();
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
@@ -495,9 +496,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           title: Text('Update $tag tersedia',
               style: const TextStyle(color: Colors.cyanAccent)),
           content: Text(
-            notes.isEmpty
+            'Versi kamu: v$current\n' +
+            (notes.isEmpty
                 ? 'Install versi baru tanpa hapus data, Sir?'
-                : notes,
+                : notes),
             style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
           actions: [
