@@ -8,13 +8,20 @@ import 'package:package_info_plus/package_info_plus.dart';
 /// jadi tidak perlu lagi disinkron manual setiap rilis.
 class UpdateService {
   /// Fallback bila package_info gagal (jangan diandalkan).
-  static const String kFallbackVersion = '2.1.0';
+  static const String kFallbackVersion = '2.5.3';
+  /// Versi asli aplikasi - update tiap rilis.
+  static const String kAppVersion = '2.5.3';
   static const String kRepo = 'ucupalam5/jarvis-robotai';
   static const String _latestUrl =
       'https://api.github.com/repos/$kRepo/releases/latest';
 
-  /// Versi app yang sedang berjalan, mis. "2.1.0" (tanpa build number).
+  /// Versi app yang sedang berjalan, mis. "2.5.3" (tanpa build number).
+  /// Prioritas: hardcoded AppVersion (selalu benar) -> PackageInfo -> fallback.
   static Future<String> appVersion() async {
+    try {
+      final v = kAppVersion.trim();
+      if (v.isNotEmpty) return v;
+    } catch (_) {}
     try {
       final info = await PackageInfo.fromPlatform();
       final v = info.version.trim();
