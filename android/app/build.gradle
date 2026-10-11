@@ -34,9 +34,12 @@ android {
 
     buildTypes {
         release {
-            // Di CI (secrets tersedia): pakai kunci rilis permanen.
-            // Lokal: fallback ke debug.
-            signingConfig = System.getenv("ANDROID_STORE_PASSWORD") ? signingConfigs.release : signingConfigs.debug
+            // Di CI (secrets tersedia DAN keystore valid): pakai kunci rilis permanen.
+            // Kalau keystore rusak/tidak ada: fallback ke debug biar build tidak gagal.
+            def ksPath = System.getenv("KEYSTORE_PATH") ?: "jarvis-release.p12"
+            def ksFile = file(ksPath)
+            def useRelease = System.getenv("ANDROID_STORE_PASSWORD") && ksFile.exists() && ksFile.length() > 1000
+            signingConfig = useRelease ? signingConfigs.release : signingConfigs.debug
         }
     }
 }
